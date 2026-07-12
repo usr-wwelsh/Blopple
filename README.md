@@ -13,9 +13,11 @@ A no-code, browser-based Doom-style map/enemy/music editor that exports standalo
 
 1. **Weapons** — editor UI + runtime support for projectiles, melee, and ranged attacks.
 2. **Enemies** — sprites, animations, melee/ranged attacks, stats, runtime AI.
-3. **Export pipeline** — bundle map JSON + runtime engine + assets into a single minified `index.html`, ~1MB target. Right now export/import only round-trips map *data* for editing, not a playable build.
+3. **Keys/doors + exit** — 4 colored keys and matching locked doors, plus an exit trigger to complete a map.
+4. **Export pipeline** — bundle map JSON + runtime engine + assets into a single minified `index.html`, ~1MB target. Right now export/import only round-trips map *data* for editing, not a playable build.
 
 ## Known limitations (deliberately deferred, not bugs)
 
 - **Height is a single-value heightfield per cell** (0/1/2). It can't represent a second story you walk *under* — that needs multiple floor/ceiling spans per cell plus a portal/sector-based renderer instead of the current single-hit-per-column raycaster.
 - **No windows in walls** — the runtime raycaster stops at the first wall hit per ray, so seeing through a window requires the ray to continue past it and composite. Not started.
+- **Single map only** — no concept of chaining multiple maps into one game yet; exported games are one standalone map. Future multilevel compatibility would need the schema and export pipeline to handle map transitions.
