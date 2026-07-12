@@ -1,0 +1,268 @@
+<script lang="ts">
+  import type { TextureDef } from "@blopple/shared";
+  import { TEXTURE_SIZE } from "@blopple/shared";
+  import { mapStore } from "../lib/mapStore.svelte";
+  import { toolStore } from "../lib/toolStore.svelte";
+  import { textureIdToColor, parseTextureRef } from "../lib/color";
+
+  const BASE_CELL_PX = 28;
+  const MIN_ZOOM = 0.25;
+  const MAX_ZOOM = 4;
+  const PAN_MARGIN = 500;
+
+  // rebuilt fresh on every mount (this component is destroyed on tab switch), so no invalidation needed
+  const textureCanvasCache = new Map<string, HTMLCanvasElement>();
+
+  function textureCanvasFor(tex: TextureDef): HTMLCanvasElement {
+    let tc = textureCanvasCache.get(tex.id);
+    if (tc) return tc;
+    tc = document.createElement("canvas");
+    tc.width = TEXTURE_SIZE;
+    tc.height = TEXTURE_SIZE;
+    const tctx = tc.getContext("2d")!;
+    for (let y = 0; y < TEXTURE_SIZE; y++) {
+      for (let x = 0; x < TEXTURE_SIZE; x++) {
+        const c = tex.pixels[y * TEXTURE_SIZE + x];
+        if (!c) continue;
+        tctx.fillStyle = c;
+        tctx.fillRect(x, y, 1, 1);
+      }
+    }
+    textureCanvasCache.set(tex.id, tc);
+    return tc;
+  }
+
+  let canvas: HTMLCanvasElement;
+  let painting = false;
+  let panning = false;
+  let lastPanX = 0;
+  let lastPanY = 0;
+  let zoom = 1;
+  let lastMapId: string | null = null;
+
+  function cellPx(): number {
+    return BASE_CELL_PX * zoom;
+  }
+
+  // canvas -> .canvas-wrap (pan margin) -> .grid-pane (the actual scroll viewport)
+  function scrollContainer(): HTMLElement | null {
+    return canvas.parentElement?.parentElement ?? null;
+  }
+
+  function centerView(): void {
+    const container = scrollContainer();
+    if (!container) return;
+    container.scrollLeft = PAN_MARGIN + canvas.width / 2 - container.clientWidth / 2;
+    container.scrollTop = PAN_MARGIN + canvas.height / 2 - container.clientHeight / 2;
+  }
+
+  function fillCell(ctx: CanvasRenderingContext2D, cx: number, cy: number, px: number, ref: string | null): void {
+    const parsed = parseTextureRef(ref);
+    if (parsed?.kind === "texture") {
+      const tex = mapStore.textureAt(parsed.id);
+      if (tex) {
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(textureCanvasFor(tex), cx, cy, px, px);
+        return;
+      }
+    }
+    ctx.fillStyle = textureIdToColor(ref);
+    ctx.fillRect(cx, cy, px, px);
+  }
+
+  function draw(): void {
+    const ctx = canvas?.getContext("2d");
+    if (!ctx) return;
+    const map = mapStore.map;
+    const px = cellPx();
+    canvas.width = map.width * px;
+    canvas.height = map.height * px;
+
+    for (const cell of map.cells) {
+      const cx = cell.x * px;
+      const cy = cell.y * px;
+
+      fillCell(ctx, cx, cy, px, cell.wallTextureId && !cell.isDoor ? cell.wallTextureId : cell.floorTextureId);
+
+      if (cell.isDoor) {
+        ctx.fillStyle = "#d4a017";
+        ctx.fillRect(cx + px * 0.3, cy, px * 0.4, px);
+      }
+
+      if (!cell.wallTextureId && cell.height > 0) {
+        ctx.fillStyle = "rgba(255,255,255,0.4)";
+        ctx.font = `${px * 0.5}px monospace`;
+        ctx.fillText(String(cell.height), cx + px * 0.32, cy + px * 0.7);
+      }
+
+      ctx.strokeStyle = "#000";
+      ctx.strokeRect(cx, cy, px, px);
+    }
+
+    const ps = map.playerStart;
+    ctx.fillStyle = "#00ffcc";
+    ctx.beginPath();
+    ctx.arc(ps.x * px, ps.y * px, px * 0.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function cellFromEvent(e: PointerEvent): { x: number; y: number } {
+    const rect = canvas.getBoundingClientRect();
+    const px = cellPx();
+    return {
+      x: Math.floor((e.clientX - rect.left) / px),
+      y: Math.floor((e.clientY - rect.top) / px),
+    };
+  }
+
+  function paintRef(): string | null {
+    if (toolStore.paintMode === "texture") {
+      return toolStore.selectedTextureId ? `texture:${toolStore.selectedTextureId}` : null;
+    }
+    return `color:${toolStore.color}`;
+  }
+
+  function paintCell(x: number, y: number): void {
+    const cell = mapStore.cellAt(x, y);
+    if (!cell) return;
+    const ref = paintRef();
+    switch (toolStore.tool) {
+      case "wall":
+        if (!ref) break;
+        cell.wallTextureId = ref;
+        cell.isDoor = false;
+        break;
+      case "floor":
+        if (!ref) break;
+        cell.floorTextureId = ref;
+        break;
+      case "ceiling":
+        if (!ref) break;
+        cell.ceilingTextureId = ref;
+        break;
+      case "erase":
+        cell.wallTextureId = null;
+        cell.isDoor = false;
+        break;
+      case "door":
+        cell.wallTextureId = null;
+        cell.isDoor = true;
+        break;
+      case "height":
+        cell.height = toolStore.height;
+        if (ref) cell.floorTextureId = ref;
+        break;
+    }
+  }
+
+  function applyTool(cx: number, cy: number): void {
+    if (toolStore.tool === "playerStart") {
+      mapStore.map.playerStart = { x: cx + 0.5, y: cy + 0.5, facing: 0 };
+      draw();
+      return;
+    }
+    const r = (toolStore.brushSize - 1) / 2;
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        paintCell(cx + dx, cy + dy);
+      }
+    }
+    draw();
+  }
+
+  function onWheel(e: WheelEvent): void {
+    e.preventDefault();
+    const container = scrollContainer();
+    if (!container) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+    const worldX = cx / cellPx();
+    const worldY = cy / cellPx();
+
+    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * factor));
+    draw();
+
+    container.scrollLeft += worldX * cellPx() - cx;
+    container.scrollTop += worldY * cellPx() - cy;
+  }
+
+  function onContextMenu(e: MouseEvent): void {
+    e.preventDefault();
+  }
+
+  function onPointerDown(e: PointerEvent): void {
+    if (e.button === 2) {
+      panning = true;
+      lastPanX = e.clientX;
+      lastPanY = e.clientY;
+      return;
+    }
+    if (e.button !== 0) return;
+    painting = true;
+    const { x, y } = cellFromEvent(e);
+    applyTool(x, y);
+  }
+
+  function onPointerMove(e: PointerEvent): void {
+    if (panning) {
+      const container = scrollContainer();
+      if (container) {
+        container.scrollLeft -= e.clientX - lastPanX;
+        container.scrollTop -= e.clientY - lastPanY;
+      }
+      lastPanX = e.clientX;
+      lastPanY = e.clientY;
+      return;
+    }
+    if (!painting) return;
+    const { x, y } = cellFromEvent(e);
+    applyTool(x, y);
+  }
+
+  function onPointerUp(): void {
+    painting = false;
+    panning = false;
+  }
+
+  $effect(() => {
+    mapStore.map;
+    draw();
+  });
+
+  // recenter only when a genuinely new/loaded map appears, not on every cell edit
+  $effect(() => {
+    const id = mapStore.map.id;
+    if (id !== lastMapId) {
+      lastMapId = id;
+      requestAnimationFrame(centerView);
+    }
+  });
+</script>
+
+<div class="canvas-wrap">
+  <canvas
+    bind:this={canvas}
+    onpointerdown={onPointerDown}
+    onpointermove={onPointerMove}
+    onpointerup={onPointerUp}
+    onpointerleave={onPointerUp}
+    onwheel={onWheel}
+    oncontextmenu={onContextMenu}
+  ></canvas>
+</div>
+
+<style>
+  .canvas-wrap {
+    display: inline-block;
+    margin: 500px;
+  }
+  canvas {
+    image-rendering: pixelated;
+    border: 1px solid #444;
+    cursor: crosshair;
+    display: block;
+  }
+</style>
