@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { KEY_COLORS, KEY_COLOR_HEX } from "@blopple/shared";
   import { toolStore, type Tool, BRUSH_SIZES } from "../lib/toolStore.svelte";
   import { PALETTE } from "../lib/color";
   import { mapStore } from "../lib/mapStore.svelte";
@@ -9,6 +10,8 @@
     { id: "floor", label: "Floor" },
     { id: "ceiling", label: "Ceiling" },
     { id: "door", label: "Door" },
+    { id: "key", label: "Key" },
+    { id: "exit", label: "Exit" },
     { id: "height", label: "Height" },
     { id: "playerStart", label: "Player Start" },
     { id: "erase", label: "Erase" },
@@ -30,6 +33,20 @@
         <button class:active={toolStore.height === h} onclick={() => (toolStore.height = h as 0 | 1 | 2)}>
           {h}
         </button>
+      {/each}
+    </div>
+  {/if}
+
+  {#if toolStore.tool === "door" || toolStore.tool === "key"}
+    <div class="group">
+      {#each KEY_COLORS as c (c)}
+        <button
+          class="swatch"
+          class:active={toolStore.keyColor === c}
+          style="background:{KEY_COLOR_HEX[c]}"
+          onclick={() => (toolStore.keyColor = c)}
+          aria-label={c}
+        ></button>
       {/each}
     </div>
   {/if}
@@ -75,7 +92,7 @@
     {/if}
   {/if}
 
-  {#if toolStore.tool !== "playerStart"}
+  {#if toolStore.tool !== "playerStart" && toolStore.tool !== "key" && toolStore.tool !== "exit"}
     <div class="group">
       <span class="label">Brush</span>
       {#each BRUSH_SIZES as size (size)}

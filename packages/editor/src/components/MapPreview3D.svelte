@@ -2,14 +2,14 @@
   import { onMount } from "svelte";
   import * as THREE from "three";
   import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-  import type { Cell, TextureDef } from "@blopple/shared";
-  import { TEXTURE_SIZE } from "@blopple/shared";
+  import type { Cell, KeyColor, TextureDef } from "@blopple/shared";
+  import { TEXTURE_SIZE, KEY_COLOR_HEX, EXIT_COLOR_HEX } from "@blopple/shared";
   import { mapStore } from "../lib/mapStore.svelte";
   import { textureIdToColor, parseTextureRef } from "../lib/color";
 
   const WALL_HEIGHT = 3;
   const STEP_HEIGHT = 1;
-  const DOOR_COLOR = "color:#d4a017";
+  const EXIT_COLOR = `color:${EXIT_COLOR_HEX}`;
 
   let container: HTMLDivElement;
   let canvas: HTMLCanvasElement;
@@ -17,6 +17,8 @@
   const wallGeometry = new THREE.BoxGeometry(1, WALL_HEIGHT, 1);
   const floorGeometry = new THREE.BoxGeometry(1, 0.1, 1);
   const doorGeometry = new THREE.BoxGeometry(1, WALL_HEIGHT * 0.7, 0.15);
+  const keyMarkerGeometry = new THREE.SphereGeometry(0.18, 12, 8);
+  const exitMarkerGeometry = new THREE.ConeGeometry(0.25, 0.5, 8);
   const riserGeometries = new Map<number, THREE.BoxGeometry>();
   const materialCache = new Map<string, THREE.MeshStandardMaterial>();
   const canvasTextureCache = new Map<string, THREE.CanvasTexture>();
@@ -91,17 +93,19 @@
     // keyed on height+texture so pillar faces pick up the same texture as the
     // raised floor they sit under, while still sharing geometry per height
     const riserBuckets = new Map<string, { height: number; ref: string | null; cells: Cell[] }>();
-    const doors: Cell[] = [];
+    const doorBuckets = new Map<KeyColor, Cell[]>();
 
     for (const cell of mapStore.map.cells) {
-      if (cell.wallTextureId && !cell.isDoor) {
+      if (cell.wallTextureId && !cell.doorColor) {
         const key = cell.wallTextureId;
         (wallBuckets.get(key) ?? wallBuckets.set(key, []).get(key)!).push(cell);
         continue;
       }
       const key = cell.floorTextureId ?? "";
       (floorBuckets.get(key) ?? floorBuckets.set(key, []).get(key)!).push(cell);
-      if (cell.isDoor) doors.push(cell);
+      if (cell.doorColor) {
+        (doorBuckets.get(cell.doorColor) ?? doorBuckets.set(cell.doorColor, []).get(cell.doorColor)!).push(cell);
+      }
       if (cell.height > 0) {
         const riserKey = `${cell.height}:${key}`;
         const bucket = riserBuckets.get(riserKey) ?? { height: cell.height, ref: cell.floorTextureId, cells: [] };
@@ -121,11 +125,24 @@
         instancedFrom(riserGeometryFor(stepHeight), materialFor(ref), cells, () => (stepHeight * STEP_HEIGHT) / 2),
       );
     }
-    if (doors.length > 0) {
+    for (const [color, cells] of doorBuckets) {
       group.add(
-        instancedFrom(doorGeometry, materialFor(DOOR_COLOR), doors, (c) => c.height * STEP_HEIGHT + (WALL_HEIGHT * 0.7) / 2),
+        instancedFrom(doorGeometry, materialFor(`color:${KEY_COLOR_HEX[color]}`), cells, (c) => c.height * STEP_HEIGHT + (WALL_HEIGHT * 0.7) / 2),
       );
     }
+
+    for (const pickup of mapStore.map.keyPickups) {
+      const cell = mapStore.cellAt(Math.floor(pickup.x), Math.floor(pickup.y));
+      const mesh = new THREE.Mesh(keyMarkerGeometry, materialFor(`color:${KEY_COLOR_HEX[pickup.color]}`));
+      mesh.position.set(pickup.x, (cell?.height ?? 0) * STEP_HEIGHT + 0.4, pickup.y);
+      group.add(mesh);
+    }
+
+    const exit = mapStore.map.exit;
+    const exitCell = mapStore.cellAt(Math.floor(exit.x), Math.floor(exit.y));
+    const exitMesh = new THREE.Mesh(exitMarkerGeometry, materialFor(EXIT_COLOR));
+    exitMesh.position.set(exit.x, (exitCell?.height ?? 0) * STEP_HEIGHT + 0.5, exit.y);
+    group.add(exitMesh);
 
     return group;
   }
@@ -182,6 +199,8 @@
       wallGeometry.dispose();
       floorGeometry.dispose();
       doorGeometry.dispose();
+      keyMarkerGeometry.dispose();
+      exitMarkerGeometry.dispose();
       riserGeometries.forEach((g) => g.dispose());
       materialCache.forEach((m) => m.dispose());
       canvasTextureCache.forEach((t) => t.dispose());

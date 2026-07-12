@@ -1,4 +1,4 @@
-import type { Cell, MapData, TextureDef, Song, Instrument, Pattern, SfxDef } from "@blopple/shared";
+import type { Cell, KeyColor, MapData, TextureDef, Song, Instrument, Pattern, SfxDef } from "@blopple/shared";
 import {
   TEXTURE_SCHEMA_VERSION,
   TEXTURE_SIZE,
@@ -22,7 +22,8 @@ function buildCells(width: number, height: number): Cell[] {
         wallTextureId: border ? "color:#888888" : null,
         floorTextureId: "color:#2a2a2a",
         ceilingTextureId: "color:#111111",
-        isDoor: false,
+        doorColor: null,
+        doorOpen: false,
       });
     }
   }
@@ -43,8 +44,10 @@ function emptyMap(width: number, height: number): MapData {
     sfx: [],
     weapons: [],
     weaponPickups: [],
+    keyPickups: [],
     player: { schemaVersion: PLAYER_SCHEMA_VERSION, health: 100, speed: 3, startingWeaponId: null },
     playerStart: { x: Math.floor(width / 2) + 0.5, y: Math.floor(height / 2) + 0.5, facing: 0 },
+    exit: { x: Math.floor(width / 2) + 0.5, y: Math.floor(height / 2) + 0.5, message: "Level Complete" },
   };
 }
 
@@ -79,11 +82,38 @@ class MapStore {
     if (!data.sfx) data.sfx = [];
     if (!data.weapons) data.weapons = [];
     if (!data.weaponPickups) data.weaponPickups = [];
+    if (!data.keyPickups) data.keyPickups = [];
     if (!data.player) {
       data.player = { schemaVersion: PLAYER_SCHEMA_VERSION, health: 100, speed: 3, startingWeaponId: null };
     }
+    if (!data.exit) {
+      data.exit = { x: data.playerStart.x, y: data.playerStart.y, message: "Level Complete" };
+    }
+    // pre-dates doorColor/doorOpen (was a plain isDoor boolean with no lock behavior) — drop it
+    for (const cell of data.cells as (Cell & { isDoor?: boolean })[]) {
+      if (cell.doorColor === undefined) {
+        cell.doorColor = null;
+        cell.doorOpen = false;
+        delete cell.isDoor;
+      }
+    }
     this.map = data;
     this.#reindex();
+  }
+
+  setKeyPickup(color: KeyColor, x: number, y: number): void {
+    const existing = this.map.keyPickups.find((k) => k.color === color);
+    if (existing) {
+      existing.x = x;
+      existing.y = y;
+    } else {
+      this.map.keyPickups.push({ color, x, y });
+    }
+  }
+
+  setExit(x: number, y: number): void {
+    this.map.exit.x = x;
+    this.map.exit.y = y;
   }
 
   textureAt(id: string): TextureDef | undefined {

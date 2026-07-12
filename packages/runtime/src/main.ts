@@ -1,6 +1,6 @@
 import type { MapData } from "@blopple/shared";
 import { renderFrame, type Camera } from "./engine";
-import { renderHud } from "./hud";
+import { renderHud, renderExitOverlay } from "./hud";
 import { InputController } from "./input";
 import { createPlayerState, updatePlayer } from "./player";
 
@@ -32,8 +32,9 @@ function loop(now: number): void {
   camera.y = player.y;
   camera.angle = player.angle;
 
-  renderFrame(ctx, BLOPPLE_MAP, camera, canvas.width, canvas.height);
-  renderHud(ctx, BLOPPLE_MAP, canvas.width, canvas.height);
+  renderFrame(ctx, BLOPPLE_MAP, camera, canvas.width, canvas.height, player.keys);
+  renderHud(ctx, BLOPPLE_MAP, player.keys, canvas.width, canvas.height);
+  if (player.hasReachedExit) renderExitOverlay(ctx, BLOPPLE_MAP, canvas.width, canvas.height);
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);

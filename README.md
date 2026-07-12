@@ -7,14 +7,14 @@ A no-code, browser-based Doom-style map/enemy/music editor that exports standalo
 - **Map editor** — paint walls/floors/ceilings/doors, three height levels, brush sizes, zoom/pan, live three.js 3D preview, in-editor playtest, JSON export/import.
 - **Textures** — pixel-art tool for authoring wall/floor textures.
 - **Music/SFX** — tracker-style song editor, synth/instrument controls, one-shot SFX editor.
+- **Keys/doors + exit** — 4 colored keys, matching locked doors, and an exit trigger to complete a map.
 - **Schemas only, no gameplay yet** — `weaponSchema.ts` and `enemySchema.ts` define the data shapes, but there's no weapon or enemy editor UI, and the runtime has no combat, projectiles, or enemy AI.
 
 ## Roadmap
 
 1. **Weapons** — fixed runtime behavior templates (melee, hitscan, projectile). Skinned/tuned via the existing texture editor (sprite), SFX editor (sound), and a stat form (damage, fire rate, ammo) — no custom animation or scripting authoring.
 2. **Enemies** — fixed runtime AI behavior templates (e.g. chaser, shooter, turret), rendered as billboard sprites (always face the camera, Doom-style). Skinned/tuned the same way as weapons: texture editor for the sprite, SFX editor for sounds, stat form for health/damage/speed.
-3. **Keys/doors + exit** — 4 colored keys and matching locked doors, plus an exit trigger to complete a map.
-4. **Export pipeline** — bundle map JSON + runtime engine + assets into a single minified `index.html`, ~1MB target. Right now export/import only round-trips map *data* for editing, not a playable build.
+3. **Export pipeline** — bundle map JSON + runtime engine + assets into a single minified `index.html`, ~1MB target. Right now export/import only round-trips map *data* for editing, not a playable build.
 
 ## Known limitations (deliberately deferred, not bugs)
 

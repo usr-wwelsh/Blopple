@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { TextureDef } from "@blopple/shared";
-  import { TEXTURE_SIZE } from "@blopple/shared";
+  import { TEXTURE_SIZE, KEY_COLOR_HEX, EXIT_COLOR_HEX } from "@blopple/shared";
   import { mapStore } from "../lib/mapStore.svelte";
   import { toolStore } from "../lib/toolStore.svelte";
   import { textureIdToColor, parseTextureRef } from "../lib/color";
@@ -82,10 +82,10 @@
       const cx = cell.x * px;
       const cy = cell.y * px;
 
-      fillCell(ctx, cx, cy, px, cell.wallTextureId && !cell.isDoor ? cell.wallTextureId : cell.floorTextureId);
+      fillCell(ctx, cx, cy, px, cell.wallTextureId && !cell.doorColor ? cell.wallTextureId : cell.floorTextureId);
 
-      if (cell.isDoor) {
-        ctx.fillStyle = "#d4a017";
+      if (cell.doorColor) {
+        ctx.fillStyle = KEY_COLOR_HEX[cell.doorColor];
         ctx.fillRect(cx + px * 0.3, cy, px * 0.4, px);
       }
 
@@ -98,6 +98,21 @@
       ctx.strokeStyle = "#000";
       ctx.strokeRect(cx, cy, px, px);
     }
+
+    for (const pickup of map.keyPickups) {
+      ctx.fillStyle = KEY_COLOR_HEX[pickup.color];
+      ctx.beginPath();
+      ctx.arc(pickup.x * px, pickup.y * px, px * 0.22, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#000";
+      ctx.stroke();
+    }
+
+    const exit = map.exit;
+    ctx.fillStyle = EXIT_COLOR_HEX;
+    ctx.fillRect(exit.x * px - px * 0.25, exit.y * px - px * 0.25, px * 0.5, px * 0.5);
+    ctx.strokeStyle = "#000";
+    ctx.strokeRect(exit.x * px - px * 0.25, exit.y * px - px * 0.25, px * 0.5, px * 0.5);
 
     const ps = map.playerStart;
     ctx.fillStyle = "#00ffcc";
@@ -130,7 +145,8 @@
       case "wall":
         if (!ref) break;
         cell.wallTextureId = ref;
-        cell.isDoor = false;
+        cell.doorColor = null;
+        cell.doorOpen = false;
         break;
       case "floor":
         if (!ref) break;
@@ -142,11 +158,13 @@
         break;
       case "erase":
         cell.wallTextureId = null;
-        cell.isDoor = false;
+        cell.doorColor = null;
+        cell.doorOpen = false;
         break;
       case "door":
         cell.wallTextureId = null;
-        cell.isDoor = true;
+        cell.doorColor = toolStore.keyColor;
+        cell.doorOpen = false;
         break;
       case "height":
         cell.height = toolStore.height;
@@ -158,6 +176,16 @@
   function applyTool(cx: number, cy: number): void {
     if (toolStore.tool === "playerStart") {
       mapStore.map.playerStart = { x: cx + 0.5, y: cy + 0.5, facing: 0 };
+      draw();
+      return;
+    }
+    if (toolStore.tool === "key") {
+      mapStore.setKeyPickup(toolStore.keyColor, cx + 0.5, cy + 0.5);
+      draw();
+      return;
+    }
+    if (toolStore.tool === "exit") {
+      mapStore.setExit(cx + 0.5, cy + 0.5);
       draw();
       return;
     }

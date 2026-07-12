@@ -1,6 +1,14 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { renderFrame, renderHud, InputController, createPlayerState, updatePlayer, type Camera } from "@blopple/runtime";
+  import {
+    renderFrame,
+    renderHud,
+    renderExitOverlay,
+    InputController,
+    createPlayerState,
+    updatePlayer,
+    type Camera,
+  } from "@blopple/runtime";
   import { mapStore } from "../lib/mapStore.svelte";
 
   let canvas: HTMLCanvasElement;
@@ -10,7 +18,11 @@
 
   onMount(() => {
     const ctx = canvas.getContext("2d")!;
-    const map = mapStore.map;
+    // cloned, not the live editor map — door unlocks and key pickups mutate map state
+    // as you play, and that shouldn't leak back into the map you're editing. Svelte 5's
+    // $state proxy can't go through structuredClone (throws "Proxy object could not be
+    // cloned"), so round-trip through JSON like App.svelte's exportMap already does.
+    const map = JSON.parse(JSON.stringify(mapStore.map));
     const player = createPlayerState(map);
     const input = new InputController(canvas);
     input.start();
@@ -40,9 +52,10 @@
       camera.angle = player.angle;
 
       const renderStart = performance.now();
-      renderFrame(ctx, map, camera, canvas.width, canvas.height);
+      renderFrame(ctx, map, camera, canvas.width, canvas.height, player.keys);
       const renderMs = performance.now() - renderStart;
-      renderHud(ctx, map, canvas.width, canvas.height);
+      renderHud(ctx, map, player.keys, canvas.width, canvas.height);
+      if (player.hasReachedExit) renderExitOverlay(ctx, map, canvas.width, canvas.height);
 
       if (debugOverlay) {
         frameMsEma = frameMsEma === 0 ? rawFrameMs : frameMsEma + (rawFrameMs - frameMsEma) * EMA_ALPHA;

@@ -1,5 +1,5 @@
-import type { Cell, HeightLevel, MapData, TextureDef } from "@blopple/shared";
-import { TEXTURE_SIZE, parseTextureRef } from "@blopple/shared";
+import type { Cell, HeightLevel, KeyColor, KeyPickup, MapData, TextureDef } from "@blopple/shared";
+import { EXIT_COLOR_HEX, KEY_COLOR_HEX, TEXTURE_SIZE, parseTextureRef } from "@blopple/shared";
 
 export const HEIGHT_STEP = 0.5;
 export const CEILING_Y = 1.6;
@@ -44,14 +44,32 @@ function textureIndexFor(map: MapData): Map<string, TextureDef> {
   return index;
 }
 
+/** A door blocks like a wall until its matching key opens it (see player.ts). */
+function isLockedDoor(cell: Cell): boolean {
+  return cell.doorColor !== null && !cell.doorOpen;
+}
+
 export function isSolid(map: MapData, x: number, y: number): boolean {
   if (x < 0 || y < 0 || x >= map.width || y >= map.height) return true;
   const cell = cellAt(map, x, y);
-  return cell === null || cell.wallTextureId !== null;
+  return cell === null || cell.wallTextureId !== null || isLockedDoor(cell);
 }
 
 export function floorHeightAt(map: MapData, x: number, y: number): HeightLevel {
   return cellAt(map, x, y)?.height ?? 0;
+}
+
+// x/y -> KeyPickup, memoized per map object like cellIndexFor — only rebuilt if map.keyPickups.length
+// changes (a pickup is removed from *rendering* by heldKeys, never by mutating this array).
+const keyPickupIndexCache = new WeakMap<MapData, { size: number; index: Map<string, KeyPickup> }>();
+
+function keyPickupIndexFor(map: MapData): Map<string, KeyPickup> {
+  const cached = keyPickupIndexCache.get(map);
+  if (cached && cached.size === map.keyPickups.length) return cached.index;
+  const index = new Map<string, KeyPickup>();
+  for (const pickup of map.keyPickups) index.set(`${Math.floor(pickup.x)},${Math.floor(pickup.y)}`, pickup);
+  keyPickupIndexCache.set(map, { size: map.keyPickups.length, index });
+  return index;
 }
 
 export interface Camera {
@@ -120,7 +138,7 @@ function castColumn(map: MapData, camera: Camera, rayDirX: number, rayDirY: numb
     }
 
     const cell = cellAt(map, mapX, mapY);
-    if (!cell || cell.wallTextureId !== null) {
+    if (!cell || cell.wallTextureId !== null || isLockedDoor(cell)) {
       hitDist = perpDist;
       wallCell = cell;
       break;
@@ -543,6 +561,133 @@ function renderPlaneSegment(
   }
 }
 
+const DOOR_BORDER_MARGIN = 0.12;
+const KEY_MARKER_RADIUS = 0.22;
+
+/** Thin colored ring around the floor of a formerly-locked, now-open door cell —
+ * the only visible trace once the wall itself is gone, so the player can still tell
+ * "a door used to be here." Painted as a second pass over the same gaps the floor was
+ * just drawn into (see renderFrame's floor block), so it inherits that occlusion for
+ * free instead of needing its own covered-set bookkeeping. */
+function paintDoorBorder(
+  data: Uint8ClampedArray,
+  bufWidth: number,
+  screenHeight: number,
+  col: number,
+  worldY: number,
+  camera: Camera,
+  rayDirX: number,
+  rayDirY: number,
+  eyeY: number,
+  centerY: number,
+  hex: string,
+  clipTop: number,
+  clipBottom: number,
+): void {
+  const top = Math.round(Math.max(0, Math.min(screenHeight, clipTop)));
+  const bottom = Math.round(Math.max(0, Math.min(screenHeight, clipBottom)));
+  if (bottom <= top) return;
+  const rgb = hexToRgb(hex);
+  for (let y = top; y < bottom; y++) {
+    const dist = planeDistAt(worldY, y, eyeY, centerY, screenHeight);
+    const fx = camera.x + dist * rayDirX;
+    const fy = camera.y + dist * rayDirY;
+    const u = fx - Math.floor(fx);
+    const v = fy - Math.floor(fy);
+    if (u > DOOR_BORDER_MARGIN && u < 1 - DOOR_BORDER_MARGIN && v > DOOR_BORDER_MARGIN && v < 1 - DOOR_BORDER_MARGIN) {
+      continue;
+    }
+    const fog = Math.max(0, 1 - dist / MAX_RENDER_DIST);
+    const i = (y * bufWidth + col) * 4;
+    data[i] = (rgb[0] * fog) | 0;
+    data[i + 1] = (rgb[1] * fog) | 0;
+    data[i + 2] = (rgb[2] * fog) | 0;
+    data[i + 3] = 255;
+  }
+}
+
+/** Solid colored patch in the middle of an uncollected key pickup's cell floor — the
+ * simplest possible marker given the runtime has no sprite/billboard renderer yet
+ * (that's the Enemies roadmap item's job, not this one). Same second-pass-over-the-
+ * gaps technique as paintDoorBorder. */
+function paintKeyMarker(
+  data: Uint8ClampedArray,
+  bufWidth: number,
+  screenHeight: number,
+  col: number,
+  worldY: number,
+  camera: Camera,
+  rayDirX: number,
+  rayDirY: number,
+  eyeY: number,
+  centerY: number,
+  hex: string,
+  clipTop: number,
+  clipBottom: number,
+): void {
+  const top = Math.round(Math.max(0, Math.min(screenHeight, clipTop)));
+  const bottom = Math.round(Math.max(0, Math.min(screenHeight, clipBottom)));
+  if (bottom <= top) return;
+  const rgb = hexToRgb(hex);
+  for (let y = top; y < bottom; y++) {
+    const dist = planeDistAt(worldY, y, eyeY, centerY, screenHeight);
+    const fx = camera.x + dist * rayDirX;
+    const fy = camera.y + dist * rayDirY;
+    const u = fx - Math.floor(fx) - 0.5;
+    const v = fy - Math.floor(fy) - 0.5;
+    if (u * u + v * v > KEY_MARKER_RADIUS * KEY_MARKER_RADIUS) continue;
+    const fog = Math.max(0, 1 - dist / MAX_RENDER_DIST);
+    const i = (y * bufWidth + col) * 4;
+    data[i] = (rgb[0] * fog) | 0;
+    data[i + 1] = (rgb[1] * fog) | 0;
+    data[i + 2] = (rgb[2] * fog) | 0;
+    data[i + 3] = 255;
+  }
+}
+
+const EXIT_MARKER_INNER = 0.14;
+const EXIT_MARKER_OUTER = 0.24;
+
+/** Colored ring on the exit cell's floor — always visible (unlike key markers, which
+ * disappear once collected), and a ring rather than paintKeyMarker's solid dot so it
+ * reads as a distinct "goal" rather than another pickup. Same technique as the other
+ * floor decals. */
+function paintExitMarker(
+  data: Uint8ClampedArray,
+  bufWidth: number,
+  screenHeight: number,
+  col: number,
+  worldY: number,
+  camera: Camera,
+  rayDirX: number,
+  rayDirY: number,
+  eyeY: number,
+  centerY: number,
+  hex: string,
+  clipTop: number,
+  clipBottom: number,
+): void {
+  const top = Math.round(Math.max(0, Math.min(screenHeight, clipTop)));
+  const bottom = Math.round(Math.max(0, Math.min(screenHeight, clipBottom)));
+  if (bottom <= top) return;
+  const rgb = hexToRgb(hex);
+  for (let y = top; y < bottom; y++) {
+    const dist = planeDistAt(worldY, y, eyeY, centerY, screenHeight);
+    const fx = camera.x + dist * rayDirX;
+    const fy = camera.y + dist * rayDirY;
+    const u = fx - Math.floor(fx) - 0.5;
+    const v = fy - Math.floor(fy) - 0.5;
+    const d2 = u * u + v * v;
+    if (d2 < EXIT_MARKER_INNER * EXIT_MARKER_INNER || d2 > EXIT_MARKER_OUTER * EXIT_MARKER_OUTER) continue;
+    const fog = Math.max(0, 1 - dist / MAX_RENDER_DIST);
+    const i = (y * bufWidth + col) * 4;
+    data[i] = (rgb[0] * fog) | 0;
+    data[i + 1] = (rgb[1] * fog) | 0;
+    data[i + 2] = (rgb[2] * fog) | 0;
+    data[i + 3] = 255;
+  }
+}
+
 /** Grid raycaster with stepped heightfields: walls are single-hit-per-column
  * (no overhangs/second stories, see README known limitations), but floor
  * height transitions between wall hits render as step risers. */
@@ -552,10 +697,13 @@ export function renderFrame(
   camera: Camera,
   width: number,
   height: number,
+  heldKeys: ReadonlySet<KeyColor> = new Set(),
 ): void {
   textureFrameStamp++;
   const centerY = height / 2;
   const eyeY = floorHeightAt(map, camera.x, camera.y) * HEIGHT_STEP + EYE_OFFSET;
+  const exitCellX = Math.floor(map.exit.x);
+  const exitCellY = Math.floor(map.exit.y);
 
   const fwdX = Math.cos(camera.angle);
   const fwdY = Math.sin(camera.angle);
@@ -659,6 +807,27 @@ export function renderFrame(
               gapStart[g], gapEnd[g],
             );
           }
+          // reuses the same gapStart/gapEnd/gapCount from the floor's own computeGaps call above
+          // (still valid — nothing has touched the shared globals since), so these decals
+          // automatically respect whatever occlusion the floor draw already resolved
+          if (cell?.doorColor && cell.doorOpen) {
+            const hex = KEY_COLOR_HEX[cell.doorColor];
+            for (let g = 0; g < gapCount; g++) {
+              paintDoorBorder(data, width, height, col, floorWorldY, camera, rayDirX, rayDirY, eyeY, centerY, hex, gapStart[g], gapEnd[g]);
+            }
+          } else if (cell && cell.x === exitCellX && cell.y === exitCellY) {
+            for (let g = 0; g < gapCount; g++) {
+              paintExitMarker(data, width, height, col, floorWorldY, camera, rayDirX, rayDirY, eyeY, centerY, EXIT_COLOR_HEX, gapStart[g], gapEnd[g]);
+            }
+          } else if (cell) {
+            const pickup = keyPickupIndexFor(map).get(`${cell.x},${cell.y}`);
+            if (pickup && !heldKeys.has(pickup.color)) {
+              const hex = KEY_COLOR_HEX[pickup.color];
+              for (let g = 0; g < gapCount; g++) {
+                paintKeyMarker(data, width, height, col, floorWorldY, camera, rayDirX, rayDirY, eyeY, centerY, hex, gapStart[g], gapEnd[g]);
+              }
+            }
+          }
         }
 
         const cA = planeProjY(CEILING_Y, segNear, eyeY, centerY, height);
@@ -715,7 +884,10 @@ export function renderFrame(
     const wallClampTop = Math.max(0, Math.min(wallTop, wallBottom));
     const wallClampBottom = Math.min(height, Math.max(wallTop, wallBottom));
     if (wallClampBottom > wallClampTop) {
-      const wallRef = wallCell?.wallTextureId ?? null;
+      const wallRef =
+        wallCell?.doorColor && !wallCell.doorOpen
+          ? `color:${KEY_COLOR_HEX[wallCell.doorColor]}`
+          : (wallCell?.wallTextureId ?? null);
       const parsed = parseTextureRef(wallRef);
       const texture = parsed?.kind === "texture" ? textureIndexFor(map).get(parsed.id) : undefined;
 
