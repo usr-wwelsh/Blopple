@@ -47,7 +47,7 @@ function emptyMap(width: number, height: number): MapData {
     keyPickups: [],
     player: { schemaVersion: PLAYER_SCHEMA_VERSION, health: 100, speed: 3, startingWeaponId: null },
     playerStart: { x: Math.floor(width / 2) + 0.5, y: Math.floor(height / 2) + 0.5, facing: 0 },
-    exit: { x: Math.floor(width / 2) + 0.5, y: Math.floor(height / 2) + 0.5, message: "Level Complete" },
+    exit: { x: 1.5, y: 1.5, message: "Level Complete" },
   };
 }
 
@@ -87,7 +87,7 @@ class MapStore {
       data.player = { schemaVersion: PLAYER_SCHEMA_VERSION, health: 100, speed: 3, startingWeaponId: null };
     }
     if (!data.exit) {
-      data.exit = { x: data.playerStart.x, y: data.playerStart.y, message: "Level Complete" };
+      data.exit = { x: 1.5, y: 1.5, message: "Level Complete" };
     }
     // pre-dates doorColor/doorOpen (was a plain isDoor boolean with no lock behavior) — drop it
     for (const cell of data.cells as (Cell & { isDoor?: boolean })[]) {
