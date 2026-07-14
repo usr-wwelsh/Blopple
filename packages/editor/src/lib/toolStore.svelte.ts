@@ -1,6 +1,6 @@
 import type { KeyColor } from "@blopple/shared";
 
-export type Tool = "wall" | "floor" | "ceiling" | "door" | "key" | "exit" | "height" | "playerStart" | "erase";
+export type Tool = "wall" | "floor" | "ceiling" | "door" | "key" | "weapon" | "exit" | "height" | "playerStart" | "erase";
 
 export const BRUSH_SIZES = [1, 3, 5, 7] as const;
 export type BrushSize = (typeof BRUSH_SIZES)[number];
@@ -17,6 +17,9 @@ class ToolStore {
   // shared by the door tool (which color to lock the door with) and the key tool
   // (which colored key pickup to place)
   keyColor = $state<KeyColor>("red");
+
+  // weapon tool: which weapon's pickup to place
+  selectedWeaponId = $state<string | null>(null);
 
   // wall/floor/ceiling painting: flat color vs. a painted texture
   paintMode = $state<PaintMode>("color");

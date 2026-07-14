@@ -1,8 +1,9 @@
 import type { MapData } from "@blopple/shared";
 import { renderFrame, type Camera } from "./engine";
-import { renderHud, renderExitOverlay } from "./hud";
+import { renderHud, renderViewmodel, renderExitOverlay } from "./hud";
 import { InputController } from "./input";
 import { createPlayerState, updatePlayer } from "./player";
+import { playSfx } from "./audio";
 
 // injected by the export step as a <script> before this bundle
 declare const BLOPPLE_MAP: MapData;
@@ -32,8 +33,14 @@ function loop(now: number): void {
   camera.y = player.y;
   camera.angle = player.angle;
 
-  renderFrame(ctx, BLOPPLE_MAP, camera, canvas.width, canvas.height, player.keys);
-  renderHud(ctx, BLOPPLE_MAP, player.keys, canvas.width, canvas.height);
+  if (player.justFired) {
+    const weapon = BLOPPLE_MAP.weapons.find((w) => w.id === player.heldWeaponIds[player.equippedIndex]);
+    playSfx(BLOPPLE_MAP, weapon?.sfxId ?? null);
+  }
+
+  renderFrame(ctx, BLOPPLE_MAP, camera, canvas.width, canvas.height, player.keys, new Set(player.heldWeaponIds));
+  renderViewmodel(ctx, BLOPPLE_MAP, player, canvas.width, canvas.height);
+  renderHud(ctx, BLOPPLE_MAP, player, canvas.width, canvas.height);
   if (player.hasReachedExit) renderExitOverlay(ctx, BLOPPLE_MAP, canvas.width, canvas.height);
   requestAnimationFrame(loop);
 }

@@ -9,6 +9,7 @@
   const MIN_ZOOM = 0.25;
   const MAX_ZOOM = 4;
   const PAN_MARGIN = 500;
+  const WEAPON_PICKUP_COLOR = "#e67e22";
 
   // rebuilt fresh on every mount (this component is destroyed on tab switch), so no invalidation needed
   const textureCanvasCache = new Map<string, HTMLCanvasElement>();
@@ -108,6 +109,13 @@
       ctx.stroke();
     }
 
+    for (const pickup of map.weaponPickups) {
+      ctx.fillStyle = WEAPON_PICKUP_COLOR;
+      ctx.fillRect(pickup.x * px - px * 0.22, pickup.y * px - px * 0.22, px * 0.44, px * 0.44);
+      ctx.strokeStyle = "#000";
+      ctx.strokeRect(pickup.x * px - px * 0.22, pickup.y * px - px * 0.22, px * 0.44, px * 0.44);
+    }
+
     const exit = map.exit;
     ctx.fillStyle = EXIT_COLOR_HEX;
     ctx.fillRect(exit.x * px - px * 0.25, exit.y * px - px * 0.25, px * 0.5, px * 0.5);
@@ -181,6 +189,11 @@
     }
     if (toolStore.tool === "key") {
       mapStore.setKeyPickup(toolStore.keyColor, cx + 0.5, cy + 0.5);
+      draw();
+      return;
+    }
+    if (toolStore.tool === "weapon") {
+      if (toolStore.selectedWeaponId) mapStore.placeWeaponPickup(toolStore.selectedWeaponId, cx + 0.5, cy + 0.5);
       draw();
       return;
     }

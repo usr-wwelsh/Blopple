@@ -1,10 +1,11 @@
-import type { Cell, KeyColor, MapData, TextureDef, Song, Instrument, Pattern, SfxDef } from "@blopple/shared";
+import type { Cell, KeyColor, MapData, TextureDef, Song, Instrument, Pattern, SfxDef, WeaponDef } from "@blopple/shared";
 import {
   TEXTURE_SCHEMA_VERSION,
   TEXTURE_SIZE,
   MUSIC_SCHEMA_VERSION,
   STEPS_PER_PATTERN,
   PLAYER_SCHEMA_VERSION,
+  WEAPON_SCHEMA_VERSION,
 } from "@blopple/shared";
 import { INSTRUMENT_PRESETS } from "./musicPresets";
 
@@ -97,6 +98,13 @@ class MapStore {
         delete cell.isDoor;
       }
     }
+    // pre-dates behavior/projectileSpeed and the texture-ref sprite format (was raw idle/fire pixel-frame arrays)
+    for (const weapon of data.weapons as (WeaponDef & { sprites: { idle: unknown; fire: unknown } })[]) {
+      if ((weapon as Partial<WeaponDef>).behavior === undefined) weapon.behavior = "hitscan";
+      if ((weapon as Partial<WeaponDef>).projectileSpeed === undefined) weapon.projectileSpeed = null;
+      if (Array.isArray(weapon.sprites.idle)) weapon.sprites.idle = null;
+      if (Array.isArray(weapon.sprites.fire)) weapon.sprites.fire = null;
+    }
     this.map = data;
     this.#reindex();
   }
@@ -114,6 +122,50 @@ class MapStore {
   setExit(x: number, y: number): void {
     this.map.exit.x = x;
     this.map.exit.y = y;
+  }
+
+  // --- weapons ---
+
+  weaponAt(id: string): WeaponDef | undefined {
+    return this.map.weapons.find((w) => w.id === id);
+  }
+
+  addWeapon(): WeaponDef {
+    const weapon: WeaponDef = {
+      schemaVersion: WEAPON_SCHEMA_VERSION,
+      id: crypto.randomUUID(),
+      name: `weapon ${this.map.weapons.length + 1}`,
+      behavior: "hitscan",
+      damage: 10,
+      fireRateMs: 400,
+      rangeCells: 5,
+      projectileSpeed: null,
+      sfxId: null,
+      sprites: { idle: null, fire: null },
+    };
+    this.map.weapons.push(weapon);
+    return weapon;
+  }
+
+  duplicateWeapon(id: string): WeaponDef | undefined {
+    const src = this.weaponAt(id);
+    if (!src) return undefined;
+    const copy: WeaponDef = { ...src, id: crypto.randomUUID(), name: `${src.name} copy`, sprites: { ...src.sprites } };
+    this.map.weapons.push(copy);
+    return copy;
+  }
+
+  removeWeapon(id: string): void {
+    const idx = this.map.weapons.findIndex((w) => w.id === id);
+    if (idx === -1) return;
+    this.map.weapons.splice(idx, 1);
+    if (this.map.player.startingWeaponId === id) this.map.player.startingWeaponId = null;
+    this.map.weaponPickups = this.map.weaponPickups.filter((p) => p.weaponId !== id);
+  }
+
+  placeWeaponPickup(weaponId: string, x: number, y: number): void {
+    this.map.weaponPickups = this.map.weaponPickups.filter((p) => !(Math.floor(p.x) === Math.floor(x) && Math.floor(p.y) === Math.floor(y)));
+    this.map.weaponPickups.push({ weaponId, x, y });
   }
 
   textureAt(id: string): TextureDef | undefined {

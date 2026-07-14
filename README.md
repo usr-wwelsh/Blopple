@@ -8,13 +8,12 @@ A no-code, browser-based Doom-style map/enemy/music editor that exports standalo
 - **Textures** — pixel-art tool for authoring wall/floor textures.
 - **Music/SFX** — tracker-style song editor, synth/instrument controls, one-shot SFX editor.
 - **Keys/doors + exit** — 4 colored keys, matching locked doors, and an exit trigger to complete a map.
-- **Schemas only, no gameplay yet** — `weaponSchema.ts` and `enemySchema.ts` define the data shapes, but there's no weapon or enemy editor UI, and the runtime has no combat, projectiles, or enemy AI.
+- **Weapons** — weapon editor (behavior template, damage/fire-rate/range stats, idle/fire sprite refs into the texture editor, fire sfx), map pickups, player equip/switch (1-4 keys) and cooldown-gated firing with real SFX and a viewmodel. `enemySchema.ts` is still just a data shape — no enemy editor UI, and the `melee`/`hitscan`/`projectile` behavior templates don't yet resolve a hit, since there's nothing to damage until enemies exist.
 
 ## Roadmap
 
-1. **Weapons** — fixed runtime behavior templates (melee, hitscan, projectile). Skinned/tuned via the existing texture editor (sprite), SFX editor (sound), and a stat form (damage, fire rate, ammo) — no custom animation or scripting authoring.
-2. **Enemies** — fixed runtime AI behavior templates (e.g. chaser, shooter, turret), rendered as billboard sprites (always face the camera, Doom-style). Skinned/tuned the same way as weapons: texture editor for the sprite, SFX editor for sounds, stat form for health/damage/speed.
-3. **Export pipeline** — bundle map JSON + runtime engine + assets into a single minified `index.html`, ~1MB target. Right now export/import only round-trips map *data* for editing, not a playable build.
+1. **Enemies** — fixed runtime AI behavior templates (e.g. chaser, shooter, turret), rendered as billboard sprites (always face the camera, Doom-style). Skinned/tuned the same way as weapons: texture editor for the sprite, SFX editor for sounds, stat form for health/damage/speed. This is also when weapons' behavior templates start actually resolving hits (melee/hitscan raycast, projectile travel+collision) against something.
+2. **Export pipeline** — bundle map JSON + runtime engine + assets into a single minified `index.html`, ~1MB target. Right now export/import only round-trips map *data* for editing, not a playable build.
 
 ## Known limitations (deliberately deferred, not bugs)
 

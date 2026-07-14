@@ -3,10 +3,12 @@
   import {
     renderFrame,
     renderHud,
+    renderViewmodel,
     renderExitOverlay,
     InputController,
     createPlayerState,
     updatePlayer,
+    playSfx,
     type Camera,
   } from "@blopple/runtime";
   import { mapStore } from "../lib/mapStore.svelte";
@@ -51,10 +53,16 @@
       camera.y = player.y;
       camera.angle = player.angle;
 
+      if (player.justFired) {
+        const weapon = map.weapons.find((w) => w.id === player.heldWeaponIds[player.equippedIndex]);
+        playSfx(map, weapon?.sfxId ?? null);
+      }
+
       const renderStart = performance.now();
-      renderFrame(ctx, map, camera, canvas.width, canvas.height, player.keys);
+      renderFrame(ctx, map, camera, canvas.width, canvas.height, player.keys, new Set(player.heldWeaponIds));
       const renderMs = performance.now() - renderStart;
-      renderHud(ctx, map, player.keys, canvas.width, canvas.height);
+      renderViewmodel(ctx, map, player, canvas.width, canvas.height);
+      renderHud(ctx, map, player, canvas.width, canvas.height);
       if (player.hasReachedExit) renderExitOverlay(ctx, map, canvas.width, canvas.height);
 
       if (debugOverlay) {

@@ -1,5 +1,6 @@
-import type { KeyColor, MapData } from "@blopple/shared";
-import { KEY_COLORS, KEY_COLOR_HEX } from "@blopple/shared";
+import type { MapData, TextureDef } from "@blopple/shared";
+import { KEY_COLORS, KEY_COLOR_HEX, TEXTURE_SIZE, parseTextureRef } from "@blopple/shared";
+import type { PlayerState } from "./player";
 
 const BAR_HEIGHT_RATIO = 0.14;
 const WEAPON_SLOT_COUNT = 4;
@@ -15,16 +16,16 @@ const SLOT_DIM_TEXT = "#555555";
 const KEY_SLOT_DIM_BORDER = "#4a4a4a";
 
 /** Doom-style bottom status bar, drawn on top of the already-rendered 3D frame.
- * Trimmed to what the schema actually tracks right now (health, one equippable
- * weapon, held keys) — no ammo/armor sections since there's no full pickup/inventory
- * system yet. */
+ * Trimmed to what the schema actually tracks right now (health, up to 4 held
+ * weapons, held keys) — no ammo/armor sections since there's no ammo tracking yet. */
 export function renderHud(
   ctx: CanvasRenderingContext2D,
   map: MapData,
-  heldKeys: ReadonlySet<KeyColor>,
+  player: PlayerState,
   width: number,
   height: number,
 ): void {
+  const heldKeys = player.keys;
   const barHeight = Math.round(height * BAR_HEIGHT_RATIO);
   const barTop = height - barHeight;
   const pad = Math.round(barHeight * 0.12);
@@ -54,12 +55,12 @@ export function renderHud(
   const weaponSlotsLeft = width - pad - slotsWidth;
   let slotX = weaponSlotsLeft;
   const slotY = barTop + (barHeight - slotSize) / 2;
-  const equippedSlot = map.player.startingWeaponId ? 1 : 0;
 
   ctx.textAlign = "center";
   for (let i = 1; i <= WEAPON_SLOT_COUNT; i++) {
-    const active = i === equippedSlot;
-    ctx.strokeStyle = active ? SLOT_ACTIVE_BORDER : SLOT_DIM_BORDER;
+    const filled = player.heldWeaponIds[i - 1] !== undefined;
+    const active = filled && player.equippedIndex === i - 1;
+    ctx.strokeStyle = active ? SLOT_ACTIVE_BORDER : filled ? SLOT_DIM_TEXT : SLOT_DIM_BORDER;
     ctx.lineWidth = 2;
     ctx.strokeRect(slotX, slotY, slotSize, slotSize);
     ctx.fillStyle = active ? SLOT_ACTIVE_TEXT : SLOT_DIM_TEXT;
@@ -94,6 +95,60 @@ export function renderHud(
   ctx.font = `${labelSize}px monospace`;
   ctx.textAlign = "right";
   ctx.fillText("KEYS", weaponSlotsLeft - slotGap * 2, barTop + barHeight - pad * 0.5);
+}
+
+const VIEWMODEL_SIZE_RATIO = 0.4;
+const VIEWMODEL_BOTTOM_MARGIN_RATIO = 0.02;
+
+// rebuilt lazily per texture and reused across frames — same pattern as MapGrid.svelte's
+// textureCanvasCache in the editor, just scoped to the runtime instead
+const viewmodelCanvasCache = new WeakMap<TextureDef, HTMLCanvasElement>();
+
+function viewmodelCanvasFor(tex: TextureDef): HTMLCanvasElement {
+  let canvas = viewmodelCanvasCache.get(tex);
+  if (canvas) return canvas;
+  canvas = document.createElement("canvas");
+  canvas.width = TEXTURE_SIZE;
+  canvas.height = TEXTURE_SIZE;
+  const ctx = canvas.getContext("2d")!;
+  for (let y = 0; y < TEXTURE_SIZE; y++) {
+    for (let x = 0; x < TEXTURE_SIZE; x++) {
+      const c = tex.pixels[y * TEXTURE_SIZE + x];
+      if (!c) continue;
+      ctx.fillStyle = c;
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }
+  viewmodelCanvasCache.set(tex, canvas);
+  return canvas;
+}
+
+/** Bottom-center first-person weapon sprite — swaps to the fire frame while
+ * player.viewmodelFlashMs is still counting down (see updatePlayer). No animation beyond
+ * that single idle/fire swap (see WeaponSpriteFrames — static frames by design). */
+export function renderViewmodel(ctx: CanvasRenderingContext2D, map: MapData, player: PlayerState, width: number, height: number): void {
+  const weaponId = player.equippedIndex >= 0 ? player.heldWeaponIds[player.equippedIndex] : undefined;
+  const weapon = weaponId ? map.weapons.find((w) => w.id === weaponId) : undefined;
+  if (!weapon) return;
+
+  const ref = player.viewmodelFlashMs > 0 ? (weapon.sprites.fire ?? weapon.sprites.idle) : weapon.sprites.idle;
+  const parsed = parseTextureRef(ref);
+  if (!parsed) return;
+
+  const size = Math.round(height * VIEWMODEL_SIZE_RATIO);
+  const x = Math.round((width - size) / 2);
+  const y = Math.round(height - size - height * VIEWMODEL_BOTTOM_MARGIN_RATIO);
+
+  if (parsed.kind === "color") {
+    ctx.fillStyle = parsed.color;
+    ctx.fillRect(x, y, size, size);
+    return;
+  }
+
+  const texture = map.textures.find((t) => t.id === parsed.id);
+  if (!texture) return;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(viewmodelCanvasFor(texture), x, y, size, size);
 }
 
 const EXIT_OVERLAY_BG = "rgba(0, 0, 0, 0.75)";

@@ -1,4 +1,4 @@
-import type { Cell, HeightLevel, KeyColor, KeyPickup, MapData, TextureDef } from "@blopple/shared";
+import type { Cell, HeightLevel, KeyColor, KeyPickup, MapData, TextureDef, WeaponPickup } from "@blopple/shared";
 import { EXIT_COLOR_HEX, KEY_COLOR_HEX, TEXTURE_SIZE, parseTextureRef } from "@blopple/shared";
 
 export const HEIGHT_STEP = 0.5;
@@ -69,6 +69,18 @@ function keyPickupIndexFor(map: MapData): Map<string, KeyPickup> {
   const index = new Map<string, KeyPickup>();
   for (const pickup of map.keyPickups) index.set(`${Math.floor(pickup.x)},${Math.floor(pickup.y)}`, pickup);
   keyPickupIndexCache.set(map, { size: map.keyPickups.length, index });
+  return index;
+}
+
+// x/y -> WeaponPickup, memoized per map object like keyPickupIndexFor
+const weaponPickupIndexCache = new WeakMap<MapData, { size: number; index: Map<string, WeaponPickup> }>();
+
+function weaponPickupIndexFor(map: MapData): Map<string, WeaponPickup> {
+  const cached = weaponPickupIndexCache.get(map);
+  if (cached && cached.size === map.weaponPickups.length) return cached.index;
+  const index = new Map<string, WeaponPickup>();
+  for (const pickup of map.weaponPickups) index.set(`${Math.floor(pickup.x)},${Math.floor(pickup.y)}`, pickup);
+  weaponPickupIndexCache.set(map, { size: map.weaponPickups.length, index });
   return index;
 }
 
@@ -645,6 +657,45 @@ function paintKeyMarker(
   }
 }
 
+const WEAPON_PICKUP_COLOR_HEX = "#e67e22";
+const WEAPON_MARKER_HALF_SIZE = 0.22;
+
+/** Small square patch on an uncollected weapon pickup's cell floor, same technique and
+ * intent as paintKeyMarker (no sprite/billboard renderer yet — see that comment above). */
+function paintWeaponMarker(
+  data: Uint8ClampedArray,
+  bufWidth: number,
+  screenHeight: number,
+  col: number,
+  worldY: number,
+  camera: Camera,
+  rayDirX: number,
+  rayDirY: number,
+  eyeY: number,
+  centerY: number,
+  clipTop: number,
+  clipBottom: number,
+): void {
+  const top = Math.round(Math.max(0, Math.min(screenHeight, clipTop)));
+  const bottom = Math.round(Math.max(0, Math.min(screenHeight, clipBottom)));
+  if (bottom <= top) return;
+  const rgb = hexToRgb(WEAPON_PICKUP_COLOR_HEX);
+  for (let y = top; y < bottom; y++) {
+    const dist = planeDistAt(worldY, y, eyeY, centerY, screenHeight);
+    const fx = camera.x + dist * rayDirX;
+    const fy = camera.y + dist * rayDirY;
+    const u = fx - Math.floor(fx) - 0.5;
+    const v = fy - Math.floor(fy) - 0.5;
+    if (Math.abs(u) > WEAPON_MARKER_HALF_SIZE || Math.abs(v) > WEAPON_MARKER_HALF_SIZE) continue;
+    const fog = Math.max(0, 1 - dist / MAX_RENDER_DIST);
+    const i = (y * bufWidth + col) * 4;
+    data[i] = (rgb[0] * fog) | 0;
+    data[i + 1] = (rgb[1] * fog) | 0;
+    data[i + 2] = (rgb[2] * fog) | 0;
+    data[i + 3] = 255;
+  }
+}
+
 const EXIT_MARKER_INNER = 0.14;
 const EXIT_MARKER_OUTER = 0.24;
 
@@ -698,6 +749,7 @@ export function renderFrame(
   width: number,
   height: number,
   heldKeys: ReadonlySet<KeyColor> = new Set(),
+  collectedWeaponIds: ReadonlySet<string> = new Set(),
 ): void {
   textureFrameStamp++;
   const centerY = height / 2;
@@ -821,10 +873,15 @@ export function renderFrame(
             }
           } else if (cell) {
             const pickup = keyPickupIndexFor(map).get(`${cell.x},${cell.y}`);
+            const weaponPickup = weaponPickupIndexFor(map).get(`${cell.x},${cell.y}`);
             if (pickup && !heldKeys.has(pickup.color)) {
               const hex = KEY_COLOR_HEX[pickup.color];
               for (let g = 0; g < gapCount; g++) {
                 paintKeyMarker(data, width, height, col, floorWorldY, camera, rayDirX, rayDirY, eyeY, centerY, hex, gapStart[g], gapEnd[g]);
+              }
+            } else if (weaponPickup && !collectedWeaponIds.has(weaponPickup.weaponId)) {
+              for (let g = 0; g < gapCount; g++) {
+                paintWeaponMarker(data, width, height, col, floorWorldY, camera, rayDirX, rayDirY, eyeY, centerY, gapStart[g], gapEnd[g]);
               }
             }
           }

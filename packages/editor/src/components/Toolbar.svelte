@@ -11,6 +11,7 @@
     { id: "ceiling", label: "Ceiling" },
     { id: "door", label: "Door" },
     { id: "key", label: "Key" },
+    { id: "weapon", label: "Weapon" },
     { id: "exit", label: "Exit" },
     { id: "height", label: "Height" },
     { id: "playerStart", label: "Player Start" },
@@ -48,6 +49,19 @@
           aria-label={c}
         ></button>
       {/each}
+    </div>
+  {/if}
+
+  {#if toolStore.tool === "weapon"}
+    <div class="group">
+      {#each mapStore.map.weapons as w (w.id)}
+        <button class:active={toolStore.selectedWeaponId === w.id} onclick={() => (toolStore.selectedWeaponId = w.id)}>
+          {w.name}
+        </button>
+      {/each}
+      {#if mapStore.map.weapons.length === 0}
+        <span class="label">no weapons yet — add one in the Weapons tab</span>
+      {/if}
     </div>
   {/if}
 
@@ -92,7 +106,7 @@
     {/if}
   {/if}
 
-  {#if toolStore.tool !== "playerStart" && toolStore.tool !== "key" && toolStore.tool !== "exit"}
+  {#if toolStore.tool !== "playerStart" && toolStore.tool !== "key" && toolStore.tool !== "weapon" && toolStore.tool !== "exit"}
     <div class="group">
       <span class="label">Brush</span>
       {#each BRUSH_SIZES as size (size)}
