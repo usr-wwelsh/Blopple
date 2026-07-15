@@ -2,8 +2,9 @@
   import { TEXTURE_SIZE } from "@blopple/shared";
   import { mapStore } from "../lib/mapStore.svelte";
   import { toolStore, type PixelTool, BRUSH_SIZES } from "../lib/toolStore.svelte";
-  import { PALETTE, rgbToHex } from "../lib/color";
+  import { PALETTE } from "../lib/color";
   import TextureThumb from "./TextureThumb.svelte";
+  import ImageImportModal from "./ImageImportModal.svelte";
 
   const BASE_PIXEL_PX = 8;
   const MIN_ZOOM = 0.25;
@@ -19,6 +20,7 @@
   let editingId = $state<string | null>(mapStore.map.textures[0]?.id ?? null);
   let canvas = $state<HTMLCanvasElement>();
   let fileInput = $state<HTMLInputElement>();
+  let importUrl = $state<string | null>(null);
   let painting = false;
   let panning = false;
   let lastPanX = 0;
@@ -191,33 +193,20 @@
   function onImportFile(e: Event): void {
     const input = e.target as HTMLInputElement;
     const file = input.files?.[0];
-    const tex = editing;
-    if (!file || !tex) return;
-
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      const off = document.createElement("canvas");
-      off.width = TEXTURE_SIZE;
-      off.height = TEXTURE_SIZE;
-      const octx = off.getContext("2d")!;
-      const side = Math.min(img.width, img.height);
-      const sx = (img.width - side) / 2;
-      const sy = (img.height - side) / 2;
-      octx.drawImage(img, sx, sy, side, side, 0, 0, TEXTURE_SIZE, TEXTURE_SIZE);
-
-      const { data } = octx.getImageData(0, 0, TEXTURE_SIZE, TEXTURE_SIZE);
-      const pixels: (string | null)[] = new Array(TEXTURE_SIZE * TEXTURE_SIZE);
-      for (let i = 0; i < pixels.length; i++) {
-        const a = data[i * 4 + 3];
-        pixels[i] = a < 16 ? null : rgbToHex(data[i * 4], data[i * 4 + 1], data[i * 4 + 2]);
-      }
-      tex.pixels = pixels;
-      draw();
-      URL.revokeObjectURL(url);
-    };
-    img.src = url;
     input.value = "";
+    if (!file || !editing) return;
+    importUrl = URL.createObjectURL(file);
+  }
+
+  function applyImport(pixels: (string | null)[]): void {
+    if (editing) editing.pixels = pixels;
+    closeImport();
+    draw();
+  }
+
+  function closeImport(): void {
+    if (importUrl) URL.revokeObjectURL(importUrl);
+    importUrl = null;
   }
 
   let centered = false;
@@ -314,6 +303,10 @@
     {/if}
   </div>
 </div>
+
+{#if importUrl}
+  <ImageImportModal imageUrl={importUrl} onApply={applyImport} onCancel={closeImport} />
+{/if}
 
 <style>
   .texture-editor {
