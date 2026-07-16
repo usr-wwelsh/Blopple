@@ -1,12 +1,13 @@
 <script lang="ts">
-  import type { Instrument, InstrumentKind, Waveform, DrumType } from "@blopple/shared";
+  import type { Instrument, InstrumentKind, Waveform, DrumType, FilterType } from "@blopple/shared";
   import { previewInstrument } from "../lib/synth";
 
   let { instrument, note = 0 }: { instrument: Instrument; note?: number } = $props();
 
   const kinds: InstrumentKind[] = ["synth", "string", "brass", "drum"];
-  const waveforms: Waveform[] = ["square", "sawtooth", "triangle"];
+  const waveforms: Waveform[] = ["sine", "square", "sawtooth", "triangle"];
   const drumTypes: DrumType[] = ["kick", "snare", "hihat", "clap"];
+  const filterTypes: FilterType[] = ["none", "lowpass", "highpass", "bandpass"];
 </script>
 
 <div class="instrument-controls">
@@ -65,6 +66,46 @@
         Release
         <input type="range" min="0" max="2" step="0.01" bind:value={instrument.release} />
       </label>
+    </div>
+    <div class="row">
+      <label>
+        Noise
+        <input type="range" min="0" max="1" step="0.01" bind:value={instrument.noiseMix} />
+      </label>
+      <label>
+        Drive
+        <input type="range" min="0" max="1" step="0.01" bind:value={instrument.distortion} />
+      </label>
+      <label>
+        Pitch decay
+        <input type="range" min="-24" max="24" step="1" bind:value={instrument.pitchDecay} />
+        <span>{instrument.pitchDecay}st</span>
+      </label>
+    </div>
+    <div class="row">
+      <label>
+        Filter
+        <select bind:value={instrument.filterType}>
+          {#each filterTypes as f (f)}
+            <option value={f}>{f}</option>
+          {/each}
+        </select>
+      </label>
+      {#if instrument.filterType !== "none"}
+        <label>
+          Cutoff
+          <input type="range" min="20" max="20000" step="10" bind:value={instrument.filterCutoff} />
+          <span>{instrument.filterCutoff}Hz</span>
+        </label>
+        <label>
+          Reso
+          <input type="range" min="0.1" max="20" step="0.1" bind:value={instrument.filterQ} />
+        </label>
+        <label>
+          Filter env
+          <input type="range" min="-4" max="4" step="0.1" bind:value={instrument.filterEnvAmount} />
+        </label>
+      {/if}
     </div>
   {/if}
 </div>

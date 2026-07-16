@@ -4,3 +4,4 @@ export * from "./musicSchema";
 export * from "./textureSchema";
 export * from "./weaponSchema";
 export * from "./playerSchema";
+export * from "./audioEngine";

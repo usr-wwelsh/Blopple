@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { SfxDef } from "@blopple/shared";
   import { mapStore } from "../lib/mapStore.svelte";
-  import { previewInstrument } from "../lib/synth";
+  import { previewSfx } from "../lib/synth";
   import InstrumentControls from "./InstrumentControls.svelte";
 
   const categories: SfxDef["category"][] = ["weapon", "enemy", "other"];
@@ -27,6 +27,18 @@
     if (!confirm("Delete this sound effect?")) return;
     mapStore.removeSfx(editingId);
     editingId = mapStore.map.sfx[0]?.id ?? null;
+  }
+
+  function addLayer(): void {
+    if (editingId) mapStore.addSfxLayer(editingId);
+  }
+
+  function duplicateLayer(layerId: string): void {
+    if (editingId) mapStore.duplicateSfxLayer(editingId, layerId);
+  }
+
+  function removeLayer(layerId: string): void {
+    if (editingId) mapStore.removeSfxLayer(editingId, layerId);
   }
 </script>
 
@@ -59,7 +71,10 @@
 
   <div class="main-pane">
     {#if editing}
-      <input class="name" type="text" bind:value={editing.name} />
+      <div class="header-row">
+        <input class="name" type="text" bind:value={editing.name} />
+        <button onclick={() => previewSfx(editing)}>▶ Preview all</button>
+      </div>
       <label class="category-select">
         Category
         <select bind:value={editing.category}>
@@ -68,12 +83,35 @@
           {/each}
         </select>
       </label>
-      <label class="note-select">
-        Note
-        <input type="range" min="-24" max="24" step="1" bind:value={editing.note} />
-        <span>{editing.note}</span>
-      </label>
-      <InstrumentControls instrument={editing.instrument} note={editing.note} />
+
+      <div class="layers">
+        {#each editing.layers as layer (layer.id)}
+          <div class="layer">
+            <div class="layer-header">
+              <label class="note-select">
+                Note
+                <input type="range" min="-24" max="24" step="1" bind:value={layer.note} />
+                <span>{layer.note}</span>
+              </label>
+              <label class="note-select">
+                Delay
+                <input type="range" min="0" max="1" step="0.01" bind:value={layer.delay} />
+                <span>{layer.delay.toFixed(2)}s</span>
+              </label>
+              <label class="note-select">
+                Gain
+                <input type="range" min="0" max="1" step="0.01" bind:value={layer.gain} />
+              </label>
+              <div class="layer-actions">
+                <button onclick={() => duplicateLayer(layer.id)}>Duplicate</button>
+                <button onclick={() => removeLayer(layer.id)} disabled={editing.layers.length <= 1}>Remove</button>
+              </div>
+            </div>
+            <InstrumentControls instrument={layer.instrument} note={layer.note} />
+          </div>
+        {/each}
+      </div>
+      <button onclick={addLayer}>+ Add layer</button>
     {:else}
       <p class="hint">Select or create a sound effect to edit it.</p>
     {/if}
@@ -141,6 +179,11 @@
     overflow: auto;
     align-items: flex-start;
   }
+  .header-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
   .name {
     background: #2a2a2a;
     color: #eee;
@@ -156,6 +199,31 @@
     gap: 0.5rem;
     font-size: 0.9em;
     color: #bbb;
+  }
+  .layers {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    width: 100%;
+  }
+  .layer {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    border: 1px solid #444;
+    padding: 0.6rem;
+    background: #262626;
+  }
+  .layer-header {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .layer-actions {
+    display: flex;
+    gap: 0.25rem;
+    margin-left: auto;
   }
   select {
     background: #2a2a2a;

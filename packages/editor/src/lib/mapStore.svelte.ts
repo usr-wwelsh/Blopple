@@ -1,4 +1,4 @@
-import type { Cell, KeyColor, MapData, TextureDef, Song, Instrument, Pattern, SfxDef, WeaponDef } from "@blopple/shared";
+import type { Cell, KeyColor, MapData, TextureDef, Song, Instrument, Pattern, SfxDef, SfxLayer, WeaponDef } from "@blopple/shared";
 import {
   TEXTURE_SCHEMA_VERSION,
   TEXTURE_SIZE,
@@ -29,6 +29,34 @@ function buildCells(width: number, height: number): Cell[] {
     }
   }
   return cells;
+}
+
+function presetInstrument(label: string): Instrument {
+  const preset = INSTRUMENT_PRESETS.find((p) => p.label === label)!;
+  return { id: crypto.randomUUID(), ...preset.make() };
+}
+
+function makeLayer(label: string, note: number, delay: number, gain: number): SfxLayer {
+  return { id: crypto.randomUUID(), instrument: presetInstrument(label), note, delay, gain };
+}
+
+/** Default weapon sfx: a stacked wall-of-noise explosion — sub boom + filtered noise blast
+ *  + a short delayed high crackle for texture — rather than a single plain synth blip. */
+function explosionLayers(): SfxLayer[] {
+  const crackle = makeLayer("Noise Wall", 0, 0.02, 0.5);
+  crackle.instrument.name = "Crackle";
+  crackle.instrument.filterType = "highpass";
+  crackle.instrument.filterCutoff = 2500;
+  crackle.instrument.filterEnvAmount = 0;
+  crackle.instrument.decay = 0.05;
+  crackle.instrument.sustain = 0;
+  crackle.instrument.release = 0.1;
+  crackle.instrument.distortion = 0.7;
+  return [makeLayer("Sub Boom", -24, 0, 1), makeLayer("Noise Wall", 0, 0, 0.9), crackle];
+}
+
+function defaultLayers(): SfxLayer[] {
+  return [makeLayer("Square Synth", 0, 0, 1)];
 }
 
 function emptyMap(width: number, height: number): MapData {
@@ -89,6 +117,26 @@ class MapStore {
     }
     if (!data.exit) {
       data.exit = { x: 1.5, y: 1.5, message: "Level Complete" };
+    }
+    // pre-dates layered sfx (was a single instrument+note pair) — wrap it as a one-layer stack
+    for (const sfx of data.sfx as (SfxDef & { instrument?: Instrument; note?: number })[]) {
+      if (!sfx.layers) {
+        sfx.layers = [{ id: crypto.randomUUID(), instrument: sfx.instrument!, note: sfx.note ?? 0, delay: 0, gain: 1 }];
+        delete sfx.instrument;
+        delete sfx.note;
+      }
+    }
+    // pre-dates filter/noise/pitch-envelope/distortion controls — neutral defaults preserve
+    // old playback exactly, except brass which used to get a hardcoded lowpass in the engine
+    for (const instrument of data.songs.flatMap((s) => s.instruments).concat(data.sfx.flatMap((s) => s.layers.map((l) => l.instrument))) as Partial<Instrument>[]) {
+      if (instrument.noiseMix !== undefined) continue;
+      instrument.noiseMix = 0;
+      instrument.filterType = instrument.kind === "brass" ? "lowpass" : "none";
+      instrument.filterCutoff = instrument.kind === "brass" ? 2200 : 20000;
+      instrument.filterQ = instrument.kind === "brass" ? 4 : 1;
+      instrument.filterEnvAmount = 0;
+      instrument.pitchDecay = 0;
+      instrument.distortion = 0;
     }
     // pre-dates doorColor/doorOpen (was a plain isDoor boolean with no lock behavior) — drop it
     for (const cell of data.cells as (Cell & { isDoor?: boolean })[]) {
@@ -309,14 +357,12 @@ class MapStore {
   }
 
   addSfx(category: SfxDef["category"]): SfxDef {
-    const preset = INSTRUMENT_PRESETS[0];
     const sfx: SfxDef = {
       schemaVersion: MUSIC_SCHEMA_VERSION,
       id: crypto.randomUUID(),
       name: `${category} sfx ${this.map.sfx.length + 1}`,
       category,
-      instrument: { id: crypto.randomUUID(), ...preset.make() },
-      note: 0,
+      layers: category === "weapon" ? explosionLayers() : defaultLayers(),
     };
     this.map.sfx.push(sfx);
     return sfx;
@@ -327,8 +373,11 @@ class MapStore {
     if (!src) return undefined;
     const copy: SfxDef = structuredClone(src);
     copy.id = crypto.randomUUID();
-    copy.instrument.id = crypto.randomUUID();
     copy.name = `${src.name} copy`;
+    for (const layer of copy.layers) {
+      layer.id = crypto.randomUUID();
+      layer.instrument.id = crypto.randomUUID();
+    }
     this.map.sfx.push(copy);
     return copy;
   }
@@ -336,6 +385,31 @@ class MapStore {
   removeSfx(id: string): void {
     const idx = this.map.sfx.findIndex((s) => s.id === id);
     if (idx !== -1) this.map.sfx.splice(idx, 1);
+  }
+
+  addSfxLayer(sfxId: string): SfxLayer | undefined {
+    const sfx = this.sfxAt(sfxId);
+    if (!sfx) return undefined;
+    const layer = makeLayer("Square Synth", 0, 0, 1);
+    sfx.layers.push(layer);
+    return layer;
+  }
+
+  duplicateSfxLayer(sfxId: string, layerId: string): SfxLayer | undefined {
+    const sfx = this.sfxAt(sfxId);
+    const src = sfx?.layers.find((l) => l.id === layerId);
+    if (!sfx || !src) return undefined;
+    const copy: SfxLayer = structuredClone(src);
+    copy.id = crypto.randomUUID();
+    copy.instrument.id = crypto.randomUUID();
+    sfx.layers.push(copy);
+    return copy;
+  }
+
+  removeSfxLayer(sfxId: string, layerId: string): void {
+    const sfx = this.sfxAt(sfxId);
+    if (!sfx || sfx.layers.length <= 1) return;
+    sfx.layers = sfx.layers.filter((l) => l.id !== layerId);
   }
 }
 
