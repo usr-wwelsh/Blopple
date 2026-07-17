@@ -1,4 +1,4 @@
-import type { Cell, KeyColor, MapData, TextureDef, Song, Instrument, Pattern, SfxDef, SfxLayer, WeaponDef } from "@blopple/shared";
+import type { Cell, KeyColor, MapData, TextureDef, Song, AudioTrackDef, Instrument, Pattern, SfxDef, SfxLayer, WeaponDef } from "@blopple/shared";
 import {
   TEXTURE_SCHEMA_VERSION,
   TEXTURE_SIZE,
@@ -70,6 +70,7 @@ function emptyMap(width: number, height: number): MapData {
     enemies: [],
     textures: [],
     songs: [],
+    audioTracks: [],
     music: { gameplaySongId: null, outroSongId: null },
     sfx: [],
     weapons: [],
@@ -109,7 +110,16 @@ class MapStore {
   loadMap(data: MapData): void {
     if (!data.textures) data.textures = [];
     if (!data.songs) data.songs = [];
+    if (!data.audioTracks) data.audioTracks = [];
     if (!data.music) data.music = { gameplaySongId: null, outroSongId: null };
+    // pre-dates imported audio tracks — gameplaySongId/outroSongId were bare Song ids;
+    // tag them so they parse as MusicRef alongside the new "track:<id>" form
+    if (data.music.gameplaySongId && !data.music.gameplaySongId.includes(":")) {
+      data.music.gameplaySongId = `song:${data.music.gameplaySongId}`;
+    }
+    if (data.music.outroSongId && !data.music.outroSongId.includes(":")) {
+      data.music.outroSongId = `song:${data.music.outroSongId}`;
+    }
     if (!data.sfx) data.sfx = [];
     if (!data.weapons) data.weapons = [];
     if (!data.weaponPickups) data.weaponPickups = [];
@@ -292,16 +302,48 @@ class MapStore {
     const idx = this.map.songs.findIndex((s) => s.id === id);
     if (idx === -1) return;
     this.map.songs.splice(idx, 1);
-    if (this.map.music.gameplaySongId === id) this.map.music.gameplaySongId = null;
-    if (this.map.music.outroSongId === id) this.map.music.outroSongId = null;
+    const ref = `song:${id}`;
+    if (this.map.music.gameplaySongId === ref) this.map.music.gameplaySongId = null;
+    if (this.map.music.outroSongId === ref) this.map.music.outroSongId = null;
   }
 
-  setGameplaySong(id: string | null): void {
-    this.map.music.gameplaySongId = id;
+  setGameplayMusic(ref: string | null): void {
+    this.map.music.gameplaySongId = ref;
   }
 
-  setOutroSong(id: string | null): void {
-    this.map.music.outroSongId = id;
+  setOutroMusic(ref: string | null): void {
+    this.map.music.outroSongId = ref;
+  }
+
+  // --- music: imported audio tracks ---
+
+  audioTrackAt(id: string): AudioTrackDef | undefined {
+    return this.map.audioTracks.find((t) => t.id === id);
+  }
+
+  addAudioTrack(name: string, dataUrl: string): AudioTrackDef {
+    const track: AudioTrackDef = {
+      schemaVersion: MUSIC_SCHEMA_VERSION,
+      id: crypto.randomUUID(),
+      name,
+      dataUrl,
+    };
+    this.map.audioTracks.push(track);
+    return track;
+  }
+
+  removeAudioTrack(id: string): void {
+    const idx = this.map.audioTracks.findIndex((t) => t.id === id);
+    if (idx === -1) return;
+    this.map.audioTracks.splice(idx, 1);
+    const ref = `track:${id}`;
+    if (this.map.music.gameplaySongId === ref) this.map.music.gameplaySongId = null;
+    if (this.map.music.outroSongId === ref) this.map.music.outroSongId = null;
+  }
+
+  renameAudioTrack(id: string, name: string): void {
+    const track = this.audioTrackAt(id);
+    if (track) track.name = name;
   }
 
   // --- music: instruments (rows stay index-aligned across a song's patterns) ---

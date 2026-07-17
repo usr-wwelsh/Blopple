@@ -2,18 +2,19 @@
   import { mapStore } from "../lib/mapStore.svelte";
   import SongEditor from "./SongEditor.svelte";
   import SfxEditor from "./SfxEditor.svelte";
+  import AudioTrackEditor from "./AudioTrackEditor.svelte";
 
-  type SubTab = "songs" | "sfx";
+  type SubTab = "songs" | "audio" | "sfx";
   let subTab = $state<SubTab>("songs");
 
   function onGameplaySongChange(e: Event): void {
     const value = (e.target as HTMLSelectElement).value;
-    mapStore.setGameplaySong(value || null);
+    mapStore.setGameplayMusic(value || null);
   }
 
   function onOutroSongChange(e: Event): void {
     const value = (e.target as HTMLSelectElement).value;
-    mapStore.setOutroSong(value || null);
+    mapStore.setOutroMusic(value || null);
   }
 </script>
 
@@ -23,29 +24,54 @@
       Gameplay Music
       <select value={mapStore.map.music.gameplaySongId ?? ""} onchange={onGameplaySongChange}>
         <option value="">None</option>
-        {#each mapStore.map.songs as s (s.id)}
-          <option value={s.id}>{s.name}</option>
-        {/each}
+        {#if mapStore.map.songs.length > 0}
+          <optgroup label="Songs">
+            {#each mapStore.map.songs as s (s.id)}
+              <option value={`song:${s.id}`}>{s.name}</option>
+            {/each}
+          </optgroup>
+        {/if}
+        {#if mapStore.map.audioTracks.length > 0}
+          <optgroup label="Imported audio">
+            {#each mapStore.map.audioTracks as t (t.id)}
+              <option value={`track:${t.id}`}>{t.name}</option>
+            {/each}
+          </optgroup>
+        {/if}
       </select>
     </label>
     <label>
       Outro Music
       <select value={mapStore.map.music.outroSongId ?? ""} onchange={onOutroSongChange}>
         <option value="">None</option>
-        {#each mapStore.map.songs as s (s.id)}
-          <option value={s.id}>{s.name}</option>
-        {/each}
+        {#if mapStore.map.songs.length > 0}
+          <optgroup label="Songs">
+            {#each mapStore.map.songs as s (s.id)}
+              <option value={`song:${s.id}`}>{s.name}</option>
+            {/each}
+          </optgroup>
+        {/if}
+        {#if mapStore.map.audioTracks.length > 0}
+          <optgroup label="Imported audio">
+            {#each mapStore.map.audioTracks as t (t.id)}
+              <option value={`track:${t.id}`}>{t.name}</option>
+            {/each}
+          </optgroup>
+        {/if}
       </select>
     </label>
   </div>
 
   <div class="sub-tabs">
     <button class:active={subTab === "songs"} onclick={() => (subTab = "songs")}>Songs</button>
+    <button class:active={subTab === "audio"} onclick={() => (subTab = "audio")}>Imported Audio</button>
     <button class:active={subTab === "sfx"} onclick={() => (subTab = "sfx")}>Sound FX</button>
   </div>
 
   {#if subTab === "songs"}
     <SongEditor />
+  {:else if subTab === "audio"}
+    <AudioTrackEditor />
   {:else}
     <SfxEditor />
   {/if}

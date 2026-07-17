@@ -1,4 +1,4 @@
-import type { Song, SfxDef } from "@blopple/shared";
+import type { Song, SfxDef, AudioTrackDef } from "@blopple/shared";
 import { playInstrument as playInstrumentAt, playSfxLayers, SongPlayer } from "@blopple/shared";
 import type { Instrument } from "@blopple/shared";
 
@@ -33,4 +33,20 @@ export { SongPlayer };
 
 export function createSongPlayer(song: Song): SongPlayer {
   return new SongPlayer(getCtx(), song);
+}
+
+let previewEl: HTMLAudioElement | null = null;
+
+/** Plays an imported audio track once, for a quick listen in the editor (not looped, unlike
+ * in-game playback). Calls onEnded when playback finishes naturally. */
+export function previewAudioTrack(track: AudioTrackDef, onEnded?: () => void): void {
+  previewEl?.pause();
+  previewEl = new Audio(track.dataUrl);
+  if (onEnded) previewEl.onended = onEnded;
+  previewEl.play();
+}
+
+export function stopAudioPreview(): void {
+  previewEl?.pause();
+  previewEl = null;
 }

@@ -10,6 +10,7 @@
   "dependencies": {
     "@blopple/runtime": "workspace:*",
     "@blopple/shared": "workspace:*",
+    "mediabunny": "^1.50.8",
     "three": "^0.169.0"
   },
   "devDependencies": {

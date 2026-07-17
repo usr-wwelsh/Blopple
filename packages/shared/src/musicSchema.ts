@@ -75,9 +75,30 @@ export interface SfxDef {
   layers: SfxLayer[];
 }
 
+/** An imported audio file, re-encoded to Ogg Opus on import (see AudioTrackEditor) and embedded
+ * as a data URL so the map JSON stays a single self-contained file, same as TextureDef pixels. */
+export interface AudioTrackDef {
+  schemaVersion: typeof MUSIC_SCHEMA_VERSION;
+  id: string;
+  name: string;
+  /** "data:audio/ogg;base64,..." */
+  dataUrl: string;
+}
+
+export type MusicRef = { kind: "song"; id: string } | { kind: "track"; id: string };
+
+/** gameplaySongId/outroSongId hold refs in "song:<id>" | "track:<id>" form, pointing at
+ * either a tracker Song or an imported AudioTrackDef. */
+export function parseMusicRef(ref: string | null): MusicRef | null {
+  if (!ref) return null;
+  if (ref.startsWith("song:")) return { kind: "song", id: ref.slice(5) };
+  if (ref.startsWith("track:")) return { kind: "track", id: ref.slice(6) };
+  return null;
+}
+
 export interface MapMusicSettings {
-  /** Song id looped for the duration of gameplay, from level start until the exit is reached. */
+  /** Ref (see parseMusicRef) looped for the duration of gameplay, from level start until the exit is reached. */
   gameplaySongId: string | null;
-  /** Song id looped once the player reaches the exit, in place of the gameplay song. */
+  /** Ref (see parseMusicRef) looped once the player reaches the exit, in place of the gameplay song. */
   outroSongId: string | null;
 }

@@ -1,5 +1,5 @@
 import type { TextureDef } from "./textureSchema";
-import type { Song, SfxDef, MapMusicSettings } from "./musicSchema";
+import type { Song, SfxDef, MapMusicSettings, AudioTrackDef } from "./musicSchema";
 import type { WeaponDef, WeaponPickup } from "./weaponSchema";
 import type { PlayerDef } from "./playerSchema";
 
@@ -58,6 +58,7 @@ export interface MapData {
   enemies: EnemyPlacement[];
   textures: TextureDef[];
   songs: Song[];
+  audioTracks: AudioTrackDef[];
   music: MapMusicSettings;
   sfx: SfxDef[];
   weapons: WeaponDef[];

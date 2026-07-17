@@ -1,5 +1,5 @@
 import type { MapData } from "@blopple/shared";
-import { playSfxLayers, SongPlayer } from "@blopple/shared";
+import { playSfxLayers, SongPlayer, parseMusicRef } from "@blopple/shared";
 
 let ctx: AudioContext | null = null;
 
@@ -20,20 +20,45 @@ export function playSfx(map: MapData, sfxId: string | null): void {
 }
 
 let musicPlayer: SongPlayer | null = null;
-let musicSongId: string | null = null;
+let trackSource: AudioBufferSourceNode | null = null;
+let musicRef: string | null = null;
 
-/** Loops the given song id, replacing whatever's currently playing — a no-op if that song
- * is already playing (safe to call every frame, e.g. "gameplay song until exit reached, then
- * outro song"). Pass null to stop music entirely. */
-export function playMusic(map: MapData, songId: string | null): void {
-  if (songId === musicSongId) return;
+/** Loops the given music ref ("song:<id>" | "track:<id>", see parseMusicRef), replacing
+ * whatever's currently playing — a no-op if that ref is already playing (safe to call every
+ * frame, e.g. "gameplay song until exit reached, then outro song"). Pass null to stop music. */
+export function playMusic(map: MapData, ref: string | null): void {
+  if (ref === musicRef) return;
   musicPlayer?.stop();
   musicPlayer = null;
-  musicSongId = songId;
-  const song = songId ? map.songs.find((s) => s.id === songId) : undefined;
-  if (!song) return;
+  trackSource?.stop();
+  trackSource = null;
+  musicRef = ref;
+  const parsed = parseMusicRef(ref);
+  if (!parsed) return;
   const actx = getCtx();
   if (actx.state === "suspended") actx.resume();
-  musicPlayer = new SongPlayer(actx, song);
-  musicPlayer.start();
+
+  if (parsed.kind === "song") {
+    const song = map.songs.find((s) => s.id === parsed.id);
+    if (!song) return;
+    musicPlayer = new SongPlayer(actx, song);
+    musicPlayer.start();
+    return;
+  }
+
+  const track = map.audioTracks.find((t) => t.id === parsed.id);
+  if (!track) return;
+  const requestedRef = ref;
+  fetch(track.dataUrl)
+    .then((r) => r.arrayBuffer())
+    .then((buf) => actx.decodeAudioData(buf))
+    .then((audioBuffer) => {
+      if (musicRef !== requestedRef) return; // superseded while decoding
+      const source = actx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.loop = true;
+      source.connect(actx.destination);
+      source.start();
+      trackSource = source;
+    });
 }
