@@ -7,8 +7,15 @@ export const EYE_OFFSET = 0.35;
 
 const MAX_RENDER_DIST = 15;
 
-// upper bound on how many bands renderPlaneSegment subdivides a floor/ceiling segment into
-const MAX_PLANE_BANDS = 64;
+// Upper bound on how many bands renderPlaneSegment subdivides a floor/ceiling segment
+// into. The single nearest floor+ceiling segment (the cell right under the player) always
+// has a large on-screen span regardless of how much of the *rest* of the floor got merged
+// into one run (see renderFrame's floor-run coalescing) — it renders every column, every
+// frame, so this cap bounds its cost independent of segment count. 128 is double the
+// original 64: cheap enough for that always-present segment, but fine enough that a long
+// merged run (which used to be many small, naturally-fine-grained segments before
+// coalescing) doesn't visibly block into flat bands.
+const MAX_PLANE_BANDS = 128;
 
 // x/y -> Cell index, memoized per map object. Cell mutations happen in place
 // (same object, x/y never change) so a cached index stays valid across frames —
@@ -190,21 +197,39 @@ function refColor(ref: string | null, fallback: string): string {
 }
 
 // Reused across frames, only reallocated when the canvas size changes — avoids
-// GC churn from allocating a fresh width*height*4 buffer every frame.
-let frameBuffer: { width: number; height: number; imageData: ImageData; data: Uint8ClampedArray } | null = null;
+// GC churn from allocating a fresh width*height*4 buffer every frame. buf32 is a
+// Uint32Array view over the same backing ArrayBuffer as the ImageData's byte
+// array: every draw call below writes one pixel as one packed 32-bit store
+// instead of 4 separate byte stores (r/g/b/a), which is what actually moves the
+// needle on textured floor/ceiling rendering — see writeShadedSpan.
+let frameBuffer: { width: number; height: number; imageData: ImageData; buf32: Uint32Array } | null = null;
 
-function getFrameBuffer(width: number, height: number): { imageData: ImageData; data: Uint8ClampedArray } {
+function getFrameBuffer(width: number, height: number): { imageData: ImageData; buf32: Uint32Array } {
   if (!frameBuffer || frameBuffer.width !== width || frameBuffer.height !== height) {
     const imageData = new ImageData(width, height);
-    frameBuffer = { width, height, imageData, data: imageData.data };
+    const buf32 = new Uint32Array(imageData.data.buffer);
+    frameBuffer = { width, height, imageData, buf32 };
   }
   return frameBuffer;
+}
+
+// Packs r/g/b (each assumed already an int in [0, 255]) plus opaque alpha into one
+// little-endian uint32 — byte 0 (r) is the least-significant byte in memory, matching
+// how Uint8ClampedArray lays out [r,g,b,a] per pixel. All draw calls here only ever
+// produce clamped 0-255 components (fog/sideMul multipliers are already in [0,1]
+// applied to 0-255 source colors), so there's nothing left for Uint8ClampedArray's
+// own clamping to do — safe to bypass it entirely by writing the packed word directly.
+function packRgb(r: number, g: number, b: number): number {
+  return (r | (g << 8) | (b << 16) | 0xff000000) >>> 0;
 }
 
 interface DepthLayer {
   dist: number;
   kind: 0 | 1;
   i: number;
+  // last step index covered by this layer, for kind 0 — see mergeFloorRun in renderFrame.
+  // Equal to `i` for kind 1 (risers are never merged, only single-step).
+  iEnd: number;
 }
 
 // Depth-sorted layers used to be a fresh array of fresh objects per column (see
@@ -215,7 +240,7 @@ interface DepthLayer {
 const layerPool: DepthLayer[] = [];
 
 function ensureLayerPool(minSize: number): void {
-  while (layerPool.length < minSize) layerPool.push({ dist: 0, kind: 0, i: 0 });
+  while (layerPool.length < minSize) layerPool.push({ dist: 0, kind: 0, i: 0, iEnd: 0 });
 }
 
 // Tracks which screen rows in the current column have already been painted by a nearer
@@ -329,7 +354,7 @@ function computeGaps(s: number, e: number): void {
 // calls per frame. Writing bytes straight into an ImageData buffer and blitting it
 // once via putImageData (see renderFrame) is what actually removes the lag.
 function writeShadedSpan(
-  data: Uint8ClampedArray,
+  buf32: Uint32Array,
   bufWidth: number,
   screenHeight: number,
   col: number,
@@ -348,23 +373,17 @@ function writeShadedSpan(
   // distant walls pop into view abruptly as the render-distance cap passed over them
   const fog = Math.max(0, 1 - dist / MAX_RENDER_DIST);
   const m = sideMul * fog;
-  const r = (rgb[0] * m) | 0;
-  const g = (rgb[1] * m) | 0;
-  const b = (rgb[2] * m) | 0;
+  const pixel = packRgb((rgb[0] * m) | 0, (rgb[1] * m) | 0, (rgb[2] * m) | 0);
   for (let y = top; y < bottom; y++) {
-    const i = (y * bufWidth + col) * 4;
-    data[i] = r;
-    data[i + 1] = g;
-    data[i + 2] = b;
-    data[i + 3] = 255;
+    buf32[y * bufWidth + col] = pixel;
   }
 }
 
 // Flat RGB expansion of a texture's hex pixels, 3 bytes/texel — lets the wall-column and
 // plane-segment hot paths index a texel's color with two array reads instead of a
 // string-keyed hexToRgb(Map) lookup. That lookup used to run once per texel *row* for walls
-// (up to TEXTURE_SIZE times per column) and once per *band* for floors/ceilings (up to
-// MAX_PLANE_BANDS times per segment, times every segment in the column) — with hundreds of
+// (up to TEXTURE_SIZE times per column) and once per *band* for floors/ceilings (up to one
+// per screen row, per segment, times every segment in the column) — with hundreds of
 // columns and several segments up close, that's hundreds of thousands of Map.get(string)
 // calls a frame, which is exactly why textured surfaces cost far more than flat-colored ones
 // even though both eventually resolve to the same handful of on-screen colors. Buffers are
@@ -395,16 +414,14 @@ function getTextureRgb(texture: TextureDef): Uint8ClampedArray {
   return buf;
 }
 
-// Reusable per-texel-row shaded RGB, sized to TEXTURE_SIZE and reused across columns —
-// see writeTexturedWallColumn below.
-const texRowR: number[] = new Array(TEXTURE_SIZE).fill(0);
-const texRowG: number[] = new Array(TEXTURE_SIZE).fill(0);
-const texRowB: number[] = new Array(TEXTURE_SIZE).fill(0);
+// Reusable per-band packed pixel for renderPlaneSegment, grown lazily to whatever band
+// count a segment needs (bounded by screen height in practice — see renderPlaneSegment) —
+// same one-store-per-pixel packing as texRowPixel below.
+let bandPixel: number[] = [];
 
-// Reusable per-band shaded RGB for renderPlaneSegment, sized to MAX_PLANE_BANDS.
-const bandR: number[] = new Array(MAX_PLANE_BANDS).fill(0);
-const bandG: number[] = new Array(MAX_PLANE_BANDS).fill(0);
-const bandB: number[] = new Array(MAX_PLANE_BANDS).fill(0);
+function ensureBandPool(minSize: number): void {
+  while (bandPixel.length < minSize) bandPixel.push(0xff000000);
+}
 
 // A textured wall column used to be drawn as up to TEXTURE_SIZE (64) separate
 // writeShadedSpan calls, one per texel row — each paying its own Math.round/clamp pair
@@ -416,8 +433,14 @@ const bandB: number[] = new Array(MAX_PLANE_BANDS).fill(0);
 // texY does), the whole row->RGB mapping can be computed once up front and then walked
 // with a single tight per-pixel loop per visible gap, no per-row rounding or lookups left
 // in the hot path.
+// Reusable per-texel-row packed pixel, sized to TEXTURE_SIZE and reused across columns —
+// replaces texRowR/G/B (see writeTexturedWallColumn): packing once per row up front means
+// the per-pixel write loop below does a single uint32 store instead of unpacking 3 separate
+// component arrays per pixel.
+const texRowPixel: number[] = new Array(TEXTURE_SIZE).fill(0xff000000);
+
 function writeTexturedWallColumn(
-  data: Uint8ClampedArray,
+  buf32: Uint32Array,
   bufWidth: number,
   screenHeight: number,
   col: number,
@@ -438,9 +461,7 @@ function writeTexturedWallColumn(
   const rgbBuf = getTextureRgb(texture);
   for (let row = 0; row < TEXTURE_SIZE; row++) {
     const o = (row * TEXTURE_SIZE + texX) * 3;
-    texRowR[row] = (rgbBuf[o] * m) | 0;
-    texRowG[row] = (rgbBuf[o + 1] * m) | 0;
-    texRowB[row] = (rgbBuf[o + 2] * m) | 0;
+    texRowPixel[row] = packRgb((rgbBuf[o] * m) | 0, (rgbBuf[o + 1] * m) | 0, (rgbBuf[o + 2] * m) | 0);
   }
   const rowStep = TEXTURE_SIZE / span;
   for (let g = 0; g < visCount; g++) {
@@ -452,11 +473,7 @@ function writeTexturedWallColumn(
       let row = rowF | 0;
       if (row < 0) row = 0;
       else if (row >= TEXTURE_SIZE) row = TEXTURE_SIZE - 1;
-      const i = (y * bufWidth + col) * 4;
-      data[i] = texRowR[row];
-      data[i + 1] = texRowG[row];
-      data[i + 2] = texRowB[row];
-      data[i + 3] = 255;
+      buf32[y * bufWidth + col] = texRowPixel[row];
       rowF += rowStep;
     }
   }
@@ -487,14 +504,18 @@ function planeDistAt(worldY: number, y: number, eyeY: number, centerY: number, s
  * screen span into rows and, for each row, recovers the world point under it to sample the
  * 2D tile at (x mod 1, y mod 1). Band count scales with the segment's on-screen height (up to
  * MAX_PLANE_BANDS) rather than a flat TEXTURE_SIZE — perspective can stretch the near segment
- * (right under the camera) across 100+ screen rows, and sampling that with only 16 bands turns
+ * (right under the camera) across 100+ screen rows, and sampling that with too few bands turns
  * it into a few giant flat-colored slabs that visibly swim as the camera moves. Distant segments
- * are naturally short on screen, so they still get resolved with far fewer bands than that cap. */
+ * are naturally short on screen, so they still get resolved with far fewer bands than that cap.
+ * renderFrame's floor-run coalescing means a long, open, uniform sightline is now one wide
+ * segment instead of dozens of narrow ones (see the coalescing comment there) — MAX_PLANE_BANDS
+ * is what keeps that single wide segment's sampling cost bounded, same as it always bounded the
+ * near segment under the player (which is large on-screen regardless of coalescing). */
 // top/bottom are the segment's full clamped screen range (already computed by the caller,
 // via planeProjY, to decide occlusion before calling in — see renderFrame); clipTop/clipBottom
 // are the uncovered sub-range within it that's actually still visible and should be painted.
 function renderPlaneSegment(
-  data: Uint8ClampedArray,
+  buf32: Uint32Array,
   bufWidth: number,
   map: MapData,
   col: number,
@@ -519,16 +540,17 @@ function renderPlaneSegment(
 
   if (!texture) {
     const midDist = (segNear + segFar) / 2;
-    writeShadedSpan(data, bufWidth, screenHeight, col, clipTop, clipBottom, refColor(ref, fallback), 1, midDist);
+    writeShadedSpan(buf32, bufWidth, screenHeight, col, clipTop, clipBottom, refColor(ref, fallback), 1, midDist);
     return;
   }
 
-  // band count tracks the segment's actual pixel span (capped at MAX_PLANE_BANDS) instead of a
-  // flat TEXTURE_SIZE floor — a distant, on-screen-tiny segment forced through 16 iterations mostly
-  // collapses to duplicate rounded rows, which both wastes time on segments that barely register
-  // and makes which few rows survive the rounding effectively arbitrary
+  // band count tracks the segment's actual pixel span (capped at MAX_PLANE_BANDS) instead of
+  // a flat TEXTURE_SIZE floor — a distant, on-screen-tiny segment forced through a fixed
+  // count would mostly collapse to duplicate rounded rows, wasting time on a segment that
+  // barely registers on screen
   const span = bottom - top;
   const bands = Math.min(MAX_PLANE_BANDS, Math.max(1, Math.ceil(span)));
+  ensureBandPool(bands);
 
   // Each band still needs its own texture sample — unlike a wall column, the world point
   // under a floor/ceiling row moves in both x and y as distance changes, so there's no single
@@ -550,9 +572,7 @@ function renderPlaneSegment(
     const texY = Math.min(TEXTURE_SIZE - 1, Math.max(0, Math.floor(v * TEXTURE_SIZE)));
     const o = (texY * TEXTURE_SIZE + texX) * 3;
     const fog = Math.max(0, 1 - dist / MAX_RENDER_DIST);
-    bandR[band] = (rgbBuf[o] * fog) | 0;
-    bandG[band] = (rgbBuf[o + 1] * fog) | 0;
-    bandB[band] = (rgbBuf[o + 2] * fog) | 0;
+    bandPixel[band] = packRgb((rgbBuf[o] * fog) | 0, (rgbBuf[o + 1] * fog) | 0, (rgbBuf[o + 2] * fog) | 0);
   }
 
   const writeTop = Math.round(Math.max(0, Math.min(screenHeight, clipTop)));
@@ -564,11 +584,7 @@ function renderPlaneSegment(
     let band = bandF | 0;
     if (band < 0) band = 0;
     else if (band >= bands) band = bands - 1;
-    const i = (y * bufWidth + col) * 4;
-    data[i] = bandR[band];
-    data[i + 1] = bandG[band];
-    data[i + 2] = bandB[band];
-    data[i + 3] = 255;
+    buf32[y * bufWidth + col] = bandPixel[band];
     bandF += bandStep;
   }
 }
@@ -582,7 +598,7 @@ const KEY_MARKER_RADIUS = 0.22;
  * just drawn into (see renderFrame's floor block), so it inherits that occlusion for
  * free instead of needing its own covered-set bookkeeping. */
 function paintDoorBorder(
-  data: Uint8ClampedArray,
+  buf32: Uint32Array,
   bufWidth: number,
   screenHeight: number,
   col: number,
@@ -610,11 +626,7 @@ function paintDoorBorder(
       continue;
     }
     const fog = Math.max(0, 1 - dist / MAX_RENDER_DIST);
-    const i = (y * bufWidth + col) * 4;
-    data[i] = (rgb[0] * fog) | 0;
-    data[i + 1] = (rgb[1] * fog) | 0;
-    data[i + 2] = (rgb[2] * fog) | 0;
-    data[i + 3] = 255;
+    buf32[y * bufWidth + col] = packRgb((rgb[0] * fog) | 0, (rgb[1] * fog) | 0, (rgb[2] * fog) | 0);
   }
 }
 
@@ -623,7 +635,7 @@ function paintDoorBorder(
  * (that's the Enemies roadmap item's job, not this one). Same second-pass-over-the-
  * gaps technique as paintDoorBorder. */
 function paintKeyMarker(
-  data: Uint8ClampedArray,
+  buf32: Uint32Array,
   bufWidth: number,
   screenHeight: number,
   col: number,
@@ -649,11 +661,7 @@ function paintKeyMarker(
     const v = fy - Math.floor(fy) - 0.5;
     if (u * u + v * v > KEY_MARKER_RADIUS * KEY_MARKER_RADIUS) continue;
     const fog = Math.max(0, 1 - dist / MAX_RENDER_DIST);
-    const i = (y * bufWidth + col) * 4;
-    data[i] = (rgb[0] * fog) | 0;
-    data[i + 1] = (rgb[1] * fog) | 0;
-    data[i + 2] = (rgb[2] * fog) | 0;
-    data[i + 3] = 255;
+    buf32[y * bufWidth + col] = packRgb((rgb[0] * fog) | 0, (rgb[1] * fog) | 0, (rgb[2] * fog) | 0);
   }
 }
 
@@ -663,7 +671,7 @@ const WEAPON_MARKER_HALF_SIZE = 0.22;
 /** Small square patch on an uncollected weapon pickup's cell floor, same technique and
  * intent as paintKeyMarker (no sprite/billboard renderer yet — see that comment above). */
 function paintWeaponMarker(
-  data: Uint8ClampedArray,
+  buf32: Uint32Array,
   bufWidth: number,
   screenHeight: number,
   col: number,
@@ -688,11 +696,7 @@ function paintWeaponMarker(
     const v = fy - Math.floor(fy) - 0.5;
     if (Math.abs(u) > WEAPON_MARKER_HALF_SIZE || Math.abs(v) > WEAPON_MARKER_HALF_SIZE) continue;
     const fog = Math.max(0, 1 - dist / MAX_RENDER_DIST);
-    const i = (y * bufWidth + col) * 4;
-    data[i] = (rgb[0] * fog) | 0;
-    data[i + 1] = (rgb[1] * fog) | 0;
-    data[i + 2] = (rgb[2] * fog) | 0;
-    data[i + 3] = 255;
+    buf32[y * bufWidth + col] = packRgb((rgb[0] * fog) | 0, (rgb[1] * fog) | 0, (rgb[2] * fog) | 0);
   }
 }
 
@@ -704,7 +708,7 @@ const EXIT_MARKER_OUTER = 0.24;
  * reads as a distinct "goal" rather than another pickup. Same technique as the other
  * floor decals. */
 function paintExitMarker(
-  data: Uint8ClampedArray,
+  buf32: Uint32Array,
   bufWidth: number,
   screenHeight: number,
   col: number,
@@ -731,12 +735,29 @@ function paintExitMarker(
     const d2 = u * u + v * v;
     if (d2 < EXIT_MARKER_INNER * EXIT_MARKER_INNER || d2 > EXIT_MARKER_OUTER * EXIT_MARKER_OUTER) continue;
     const fog = Math.max(0, 1 - dist / MAX_RENDER_DIST);
-    const i = (y * bufWidth + col) * 4;
-    data[i] = (rgb[0] * fog) | 0;
-    data[i + 1] = (rgb[1] * fog) | 0;
-    data[i + 2] = (rgb[2] * fog) | 0;
-    data[i + 3] = 255;
+    buf32[y * bufWidth + col] = packRgb((rgb[0] * fog) | 0, (rgb[1] * fog) | 0, (rgb[2] * fog) | 0);
   }
+}
+
+/** True if this cell needs its own individually-rendered floor segment (door border, exit
+ * ring, or an uncollected pickup) rather than being merged into a neighboring run of plain
+ * floor — see mergeFloorRun below. Cheap coordinate/set lookups only, no rendering. */
+function cellHasFloorDecal(
+  map: MapData,
+  cell: Cell | null,
+  exitCellX: number,
+  exitCellY: number,
+  heldKeys: ReadonlySet<KeyColor>,
+  collectedWeaponIds: ReadonlySet<string>,
+): boolean {
+  if (!cell) return false;
+  if (cell.doorColor && cell.doorOpen) return true;
+  if (cell.x === exitCellX && cell.y === exitCellY) return true;
+  const pickup = keyPickupIndexFor(map).get(`${cell.x},${cell.y}`);
+  if (pickup && !heldKeys.has(pickup.color)) return true;
+  const weaponPickup = weaponPickupIndexFor(map).get(`${cell.x},${cell.y}`);
+  if (weaponPickup && !collectedWeaponIds.has(weaponPickup.weaponId)) return true;
+  return false;
 }
 
 /** Grid raycaster with stepped heightfields: walls are single-hit-per-column
@@ -763,7 +784,7 @@ export function renderFrame(
   const planeX = -fwdY * planeLen;
   const planeY = fwdX * planeLen;
 
-  const { imageData, data } = getFrameBuffer(width, height);
+  const { imageData, buf32 } = getFrameBuffer(width, height);
 
   for (let col = 0; col < width; col++) {
     const cameraX = (2 * col) / width - 1;
@@ -792,13 +813,37 @@ export function renderFrame(
 
     ensureLayerPool(steps.length * 2);
     let layerCount = 0;
-    for (let i = 0; i < steps.length; i++) {
-      const segFar = i + 1 < steps.length ? steps[i + 1].dist : hitDist;
-      if (segFar <= steps[i].dist) continue;
-      const layer = layerPool[layerCount++];
-      layer.dist = steps[i].dist;
-      layer.kind = 0;
-      layer.i = i;
+    // Coalesces consecutive steps into one floor/ceiling layer when they'd render
+    // identically anyway (same height, same floor+ceiling texture, no door/exit/pickup
+    // to draw) — a long unobstructed sightline over open floor otherwise racks up one
+    // DDA-grid-crossing per step (see castColumn), each paying its own computeGaps call
+    // and renderPlaneSegment band loop for what is visually a single flat surface. Runs
+    // break at any decal-bearing cell so door borders/exit rings/pickups still render
+    // individually and exactly where they are.
+    let i = 0;
+    while (i < steps.length) {
+      const cell = steps[i].cell;
+      let j = i;
+      if (!cellHasFloorDecal(map, cell, exitCellX, exitCellY, heldKeys, collectedWeaponIds)) {
+        while (
+          j + 1 < steps.length &&
+          steps[j + 1].height === steps[i].height &&
+          (steps[j + 1].cell?.floorTextureId ?? null) === (cell?.floorTextureId ?? null) &&
+          (steps[j + 1].cell?.ceilingTextureId ?? null) === (cell?.ceilingTextureId ?? null) &&
+          !cellHasFloorDecal(map, steps[j + 1].cell, exitCellX, exitCellY, heldKeys, collectedWeaponIds)
+        ) {
+          j++;
+        }
+      }
+      const segFar = j + 1 < steps.length ? steps[j + 1].dist : hitDist;
+      if (segFar > steps[i].dist) {
+        const layer = layerPool[layerCount++];
+        layer.dist = steps[i].dist;
+        layer.kind = 0;
+        layer.i = i;
+        layer.iEnd = j;
+      }
+      i = j + 1;
     }
     for (let i = steps.length - 1; i > 0; i--) {
       // only a riser as a step rising in front of the viewer (far > near) — with no camera
@@ -809,6 +854,7 @@ export function renderFrame(
       layer.dist = Math.max(steps[i].dist, 0.0001);
       layer.kind = 1;
       layer.i = i;
+      layer.iEnd = i;
     }
     // farthest-to-nearest so a nearer surface always wins the rows it shares with a farther one.
     // Insertion sort over the pooled range (layerCount is small — a handful of steps per
@@ -818,16 +864,19 @@ export function renderFrame(
       const dist = layerPool[i].dist;
       const kind = layerPool[i].kind;
       const idx = layerPool[i].i;
+      const idxEnd = layerPool[i].iEnd;
       let j = i - 1;
       while (j >= 0 && layerPool[j].dist < dist) {
         layerPool[j + 1].dist = layerPool[j].dist;
         layerPool[j + 1].kind = layerPool[j].kind;
         layerPool[j + 1].i = layerPool[j].i;
+        layerPool[j + 1].iEnd = layerPool[j].iEnd;
         j--;
       }
       layerPool[j + 1].dist = dist;
       layerPool[j + 1].kind = kind;
       layerPool[j + 1].i = idx;
+      layerPool[j + 1].iEnd = idxEnd;
     }
 
     // Nearest-to-farthest (reverse of the farthest-to-nearest sort above): each layer is
@@ -842,7 +891,7 @@ export function renderFrame(
       const i = layer.i;
       if (layer.kind === 0) {
         const segNear = steps[i].dist;
-        const segFar = i + 1 < steps.length ? steps[i + 1].dist : hitDist;
+        const segFar = layer.iEnd + 1 < steps.length ? steps[layer.iEnd + 1].dist : hitDist;
         const cell = steps[i].cell;
 
         const floorWorldY = steps[i].height * HEIGHT_STEP;
@@ -854,7 +903,7 @@ export function renderFrame(
           computeGaps(floorTop, floorBottom);
           for (let g = 0; g < gapCount; g++) {
             renderPlaneSegment(
-              data, width, map, col, cell?.floorTextureId ?? null, floorWorldY, floorTop, floorBottom,
+              buf32, width, map, col, cell?.floorTextureId ?? null, floorWorldY, floorTop, floorBottom,
               segNear, segFar, camera, rayDirX, rayDirY, eyeY, centerY, height, "#333333",
               gapStart[g], gapEnd[g],
             );
@@ -865,11 +914,11 @@ export function renderFrame(
           if (cell?.doorColor && cell.doorOpen) {
             const hex = KEY_COLOR_HEX[cell.doorColor];
             for (let g = 0; g < gapCount; g++) {
-              paintDoorBorder(data, width, height, col, floorWorldY, camera, rayDirX, rayDirY, eyeY, centerY, hex, gapStart[g], gapEnd[g]);
+              paintDoorBorder(buf32, width, height, col, floorWorldY, camera, rayDirX, rayDirY, eyeY, centerY, hex, gapStart[g], gapEnd[g]);
             }
           } else if (cell && cell.x === exitCellX && cell.y === exitCellY) {
             for (let g = 0; g < gapCount; g++) {
-              paintExitMarker(data, width, height, col, floorWorldY, camera, rayDirX, rayDirY, eyeY, centerY, EXIT_COLOR_HEX, gapStart[g], gapEnd[g]);
+              paintExitMarker(buf32, width, height, col, floorWorldY, camera, rayDirX, rayDirY, eyeY, centerY, EXIT_COLOR_HEX, gapStart[g], gapEnd[g]);
             }
           } else if (cell) {
             const pickup = keyPickupIndexFor(map).get(`${cell.x},${cell.y}`);
@@ -877,11 +926,11 @@ export function renderFrame(
             if (pickup && !heldKeys.has(pickup.color)) {
               const hex = KEY_COLOR_HEX[pickup.color];
               for (let g = 0; g < gapCount; g++) {
-                paintKeyMarker(data, width, height, col, floorWorldY, camera, rayDirX, rayDirY, eyeY, centerY, hex, gapStart[g], gapEnd[g]);
+                paintKeyMarker(buf32, width, height, col, floorWorldY, camera, rayDirX, rayDirY, eyeY, centerY, hex, gapStart[g], gapEnd[g]);
               }
             } else if (weaponPickup && !collectedWeaponIds.has(weaponPickup.weaponId)) {
               for (let g = 0; g < gapCount; g++) {
-                paintWeaponMarker(data, width, height, col, floorWorldY, camera, rayDirX, rayDirY, eyeY, centerY, gapStart[g], gapEnd[g]);
+                paintWeaponMarker(buf32, width, height, col, floorWorldY, camera, rayDirX, rayDirY, eyeY, centerY, gapStart[g], gapEnd[g]);
               }
             }
           }
@@ -895,7 +944,7 @@ export function renderFrame(
           computeGaps(ceilTop, ceilBottom);
           for (let g = 0; g < gapCount; g++) {
             renderPlaneSegment(
-              data, width, map, col, cell?.ceilingTextureId ?? null, CEILING_Y, ceilTop, ceilBottom,
+              buf32, width, map, col, cell?.ceilingTextureId ?? null, CEILING_Y, ceilTop, ceilBottom,
               segNear, segFar, camera, rayDirX, rayDirY, eyeY, centerY, height, "#1a1a1a",
               gapStart[g], gapEnd[g],
             );
@@ -923,12 +972,12 @@ export function renderFrame(
             if (riserSide === 1 && rayDirY < 0) riserU = 1 - riserU;
             const riserTexX = Math.min(TEXTURE_SIZE - 1, Math.max(0, Math.floor(riserU * TEXTURE_SIZE)));
             writeTexturedWallColumn(
-              data, width, height, col, riserTexture, riserTexX, rA, rB, 0.85, riserDist,
+              buf32, width, height, col, riserTexture, riserTexX, rA, rB, 0.85, riserDist,
               gapStart, gapEnd, gapCount,
             );
           } else {
             for (let g = 0; g < gapCount; g++) {
-              writeShadedSpan(data, width, height, col, gapStart[g], gapEnd[g], "#999999", 0.85, riserDist);
+              writeShadedSpan(buf32, width, height, col, gapStart[g], gapEnd[g], "#999999", 0.85, riserDist);
             }
           }
         }
@@ -960,13 +1009,13 @@ export function renderFrame(
 
         computeGaps(wallClampTop, wallClampBottom);
         writeTexturedWallColumn(
-          data, width, height, col, texture, texX, wallTop, wallTextureBottom, sideMul, corrected,
+          buf32, width, height, col, texture, texX, wallTop, wallTextureBottom, sideMul, corrected,
           gapStart, gapEnd, gapCount,
         );
       } else {
         computeGaps(wallClampTop, wallClampBottom);
         for (let g = 0; g < gapCount; g++) {
-          writeShadedSpan(data, width, height, col, gapStart[g], gapEnd[g], refColor(wallRef, "#888888"), sideMul, corrected);
+          writeShadedSpan(buf32, width, height, col, gapStart[g], gapEnd[g], refColor(wallRef, "#888888"), sideMul, corrected);
         }
       }
     }
