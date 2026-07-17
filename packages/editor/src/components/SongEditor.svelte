@@ -1,7 +1,7 @@
 <script lang="ts">
   import { mapStore } from "../lib/mapStore.svelte";
   import { INSTRUMENT_PRESETS } from "../lib/musicPresets";
-  import { SongPlayer, noteName } from "../lib/synth";
+  import { SongPlayer, createSongPlayer, noteName } from "../lib/synth";
   import InstrumentControls from "./InstrumentControls.svelte";
 
   const MAX_NOTE = 24;
@@ -24,7 +24,7 @@
     player?.stop();
     playing = false;
     currentStep = null;
-    player = s ? new SongPlayer(s) : undefined;
+    player = s ? createSongPlayer(s) : undefined;
     if (player) {
       player.onStep = (order, step) => (currentStep = { order, step });
     }

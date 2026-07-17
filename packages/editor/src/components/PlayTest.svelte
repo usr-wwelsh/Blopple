@@ -9,6 +9,7 @@
     createPlayerState,
     updatePlayer,
     playSfx,
+    playMusic,
     type Camera,
   } from "@blopple/runtime";
   import { mapStore } from "../lib/mapStore.svelte";
@@ -57,6 +58,7 @@
         const weapon = map.weapons.find((w) => w.id === player.heldWeaponIds[player.equippedIndex]);
         playSfx(map, weapon?.sfxId ?? null);
       }
+      playMusic(map, player.hasReachedExit ? map.music.outroSongId : map.music.gameplaySongId);
 
       const renderStart = performance.now();
       renderFrame(ctx, map, camera, canvas.width, canvas.height, player.keys, new Set(player.heldWeaponIds));
@@ -79,6 +81,7 @@
       cancelAnimationFrame(frameId);
       document.removeEventListener("pointerlockchange", onLockChange);
       input.stop();
+      playMusic(map, null);
     };
   });
 </script>

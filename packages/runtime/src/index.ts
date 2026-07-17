@@ -5,4 +5,4 @@ export { InputController } from "./input";
 export type { InputState } from "./input";
 export { createPlayerState, updatePlayer } from "./player";
 export type { PlayerState } from "./player";
-export { playSfx } from "./audio";
+export { playSfx, playMusic } from "./audio";

@@ -3,7 +3,7 @@ import { renderFrame, type Camera } from "./engine";
 import { renderHud, renderViewmodel, renderExitOverlay } from "./hud";
 import { InputController } from "./input";
 import { createPlayerState, updatePlayer } from "./player";
-import { playSfx } from "./audio";
+import { playSfx, playMusic } from "./audio";
 
 // injected by the export step as a <script> before this bundle
 declare const BLOPPLE_MAP: MapData;
@@ -37,6 +37,7 @@ function loop(now: number): void {
     const weapon = BLOPPLE_MAP.weapons.find((w) => w.id === player.heldWeaponIds[player.equippedIndex]);
     playSfx(BLOPPLE_MAP, weapon?.sfxId ?? null);
   }
+  playMusic(BLOPPLE_MAP, player.hasReachedExit ? BLOPPLE_MAP.music.outroSongId : BLOPPLE_MAP.music.gameplaySongId);
 
   renderFrame(ctx, BLOPPLE_MAP, camera, canvas.width, canvas.height, player.keys, new Set(player.heldWeaponIds));
   renderViewmodel(ctx, BLOPPLE_MAP, player, canvas.width, canvas.height);

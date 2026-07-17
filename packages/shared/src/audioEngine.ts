@@ -1,4 +1,5 @@
-import type { DrumType, Instrument, SfxLayer } from "./musicSchema";
+import type { DrumType, Instrument, SfxLayer, Song } from "./musicSchema";
+import { STEPS_PER_PATTERN } from "./musicSchema";
 
 // Shared Web Audio synthesis core used by both the editor (song/sfx authoring + preview)
 // and the game runtime (one-shot sfx playback). Callers own their own AudioContext lifecycle;
@@ -211,5 +212,85 @@ export function playInstrument(
 export function playSfxLayers(actx: AudioContext, dest: AudioNode, layers: SfxLayer[], when: number, duration: number): void {
   for (const layer of layers) {
     playInstrument(actx, dest, layer.instrument, layer.note, when + layer.delay, duration, layer.gain);
+  }
+}
+
+/** Schedules a Song's pattern order on a lookahead timer, looping the order indefinitely.
+ *  Used by both the editor (song preview) and the runtime (in-game music) — callers own the
+ *  AudioContext and destination, this just walks the arrangement and schedules notes into it. */
+export class SongPlayer {
+  private song: Song;
+  private actx: AudioContext;
+  private dest: AudioNode;
+  private timerId: number | null = null;
+  private nextStepTime = 0;
+  private orderIndex = 0;
+  private stepIndex = 0;
+  playing = false;
+  onStep?: (orderIndex: number, stepIndex: number) => void;
+
+  constructor(actx: AudioContext, song: Song, dest: AudioNode = actx.destination) {
+    this.actx = actx;
+    this.song = song;
+    this.dest = dest;
+  }
+
+  private stepDuration(): number {
+    return 60 / this.song.bpm / 4;
+  }
+
+  start(): void {
+    if (this.song.order.length === 0 || this.playing) return;
+    if (this.actx.state === "suspended") this.actx.resume();
+    this.playing = true;
+    this.orderIndex = 0;
+    this.stepIndex = 0;
+    this.nextStepTime = this.actx.currentTime + 0.05;
+    this.tick();
+  }
+
+  stop(): void {
+    this.playing = false;
+    if (this.timerId !== null) {
+      clearTimeout(this.timerId);
+      this.timerId = null;
+    }
+  }
+
+  private tick = (): void => {
+    if (!this.playing) return;
+    const lookahead = 0.2;
+    while (this.nextStepTime < this.actx.currentTime + lookahead) {
+      this.scheduleStep(this.nextStepTime);
+      const capturedOrder = this.orderIndex;
+      const capturedStep = this.stepIndex;
+      const delayMs = Math.max(0, (this.nextStepTime - this.actx.currentTime) * 1000);
+      if (this.onStep) {
+        const onStep = this.onStep;
+        window.setTimeout(() => this.playing && onStep(capturedOrder, capturedStep), delayMs);
+      }
+
+      this.nextStepTime += this.stepDuration();
+      this.stepIndex++;
+      if (this.stepIndex >= STEPS_PER_PATTERN) {
+        this.stepIndex = 0;
+        this.orderIndex = (this.orderIndex + 1) % this.song.order.length;
+      }
+    }
+    this.timerId = window.setTimeout(this.tick, 25);
+  };
+
+  private scheduleStep(when: number): void {
+    const patternId = this.song.order[this.orderIndex];
+    const pattern = this.song.patterns.find((p) => p.id === patternId);
+    if (!pattern) return;
+    const duration = this.stepDuration() * 0.9;
+    pattern.rows.forEach((row, i) => {
+      const note = row[this.stepIndex];
+      if (note === undefined || note < 0) return;
+      const instrument = this.song.instruments[i];
+      if (!instrument) return;
+      playInstrument(this.actx, this.dest, instrument, note, when, duration);
+    });
   }
 }

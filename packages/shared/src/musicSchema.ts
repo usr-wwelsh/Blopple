@@ -74,3 +74,10 @@ export interface SfxDef {
   /** stacked sounds played together (with per-layer delay) when this sfx fires */
   layers: SfxLayer[];
 }
+
+export interface MapMusicSettings {
+  /** Song id looped for the duration of gameplay, from level start until the exit is reached. */
+  gameplaySongId: string | null;
+  /** Song id looped once the player reaches the exit, in place of the gameplay song. */
+  outroSongId: string | null;
+}

@@ -70,6 +70,7 @@ function emptyMap(width: number, height: number): MapData {
     enemies: [],
     textures: [],
     songs: [],
+    music: { gameplaySongId: null, outroSongId: null },
     sfx: [],
     weapons: [],
     weaponPickups: [],
@@ -108,6 +109,7 @@ class MapStore {
   loadMap(data: MapData): void {
     if (!data.textures) data.textures = [];
     if (!data.songs) data.songs = [];
+    if (!data.music) data.music = { gameplaySongId: null, outroSongId: null };
     if (!data.sfx) data.sfx = [];
     if (!data.weapons) data.weapons = [];
     if (!data.weaponPickups) data.weaponPickups = [];
@@ -288,7 +290,18 @@ class MapStore {
 
   removeSong(id: string): void {
     const idx = this.map.songs.findIndex((s) => s.id === id);
-    if (idx !== -1) this.map.songs.splice(idx, 1);
+    if (idx === -1) return;
+    this.map.songs.splice(idx, 1);
+    if (this.map.music.gameplaySongId === id) this.map.music.gameplaySongId = null;
+    if (this.map.music.outroSongId === id) this.map.music.outroSongId = null;
+  }
+
+  setGameplaySong(id: string | null): void {
+    this.map.music.gameplaySongId = id;
+  }
+
+  setOutroSong(id: string | null): void {
+    this.map.music.outroSongId = id;
   }
 
   // --- music: instruments (rows stay index-aligned across a song's patterns) ---
