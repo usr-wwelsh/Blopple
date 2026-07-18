@@ -538,12 +538,6 @@ function renderPlaneSegment(
   const parsed = parseTextureRef(ref);
   const texture = parsed?.kind === "texture" ? textureIndexFor(map).get(parsed.id) : undefined;
 
-  if (!texture) {
-    const midDist = (segNear + segFar) / 2;
-    writeShadedSpan(buf32, bufWidth, screenHeight, col, clipTop, clipBottom, refColor(ref, fallback), 1, midDist);
-    return;
-  }
-
   // band count tracks the segment's actual pixel span (capped at MAX_PLANE_BANDS) instead of
   // a flat TEXTURE_SIZE floor — a distant, on-screen-tiny segment forced through a fixed
   // count would mostly collapse to duplicate rounded rows, wasting time on a segment that
@@ -552,27 +546,34 @@ function renderPlaneSegment(
   const bands = Math.min(MAX_PLANE_BANDS, Math.max(1, Math.ceil(span)));
   ensureBandPool(bands);
 
-  // Each band still needs its own texture sample — unlike a wall column, the world point
-  // under a floor/ceiling row moves in both x and y as distance changes, so there's no single
-  // fixed texture column to precompute like writeTexturedWallColumn does. What *is* shared
-  // with that fix: computing all `bands` samples up front, then writing pixels in a single
-  // tight sweep below, instead of up to 64 separate writeShadedSpan calls each re-paying
-  // their own rounding/clamping.
-  const rgbBuf = getTextureRgb(texture);
+  // Every band still needs its own fog value even for a flat color — the world distance
+  // under a floor/ceiling row changes across the segment, and run-coalescing (see renderFrame)
+  // now regularly hands this a single wide segment spanning a whole open sightline. Fogging
+  // it with one span-averaged distance (the old shortcut here) made a merged colored run
+  // render as one uniform-brightness slab that never fades into the distance — looked like
+  // a flat plane stretching to infinity instead of receding. Texture sampling (u/v/texX/texY)
+  // is the only per-band cost a flat color can skip.
+  const rgbBuf = texture ? getTextureRgb(texture) : null;
+  const flatRgb = rgbBuf ? null : hexToRgb(refColor(ref, fallback));
   for (let band = 0; band < bands; band++) {
     const rowTop = top + (band / bands) * span;
     const rowBottom = top + ((band + 1) / bands) * span;
     const midY = (rowTop + rowBottom) / 2;
     const dist = planeDistAt(worldY, midY, eyeY, centerY, screenHeight);
-    const fx = camera.x + dist * rayDirX;
-    const fy = camera.y + dist * rayDirY;
-    const u = fx - Math.floor(fx);
-    const v = fy - Math.floor(fy);
-    const texX = Math.min(TEXTURE_SIZE - 1, Math.max(0, Math.floor(u * TEXTURE_SIZE)));
-    const texY = Math.min(TEXTURE_SIZE - 1, Math.max(0, Math.floor(v * TEXTURE_SIZE)));
-    const o = (texY * TEXTURE_SIZE + texX) * 3;
     const fog = Math.max(0, 1 - dist / MAX_RENDER_DIST);
-    bandPixel[band] = packRgb((rgbBuf[o] * fog) | 0, (rgbBuf[o + 1] * fog) | 0, (rgbBuf[o + 2] * fog) | 0);
+    if (rgbBuf) {
+      const fx = camera.x + dist * rayDirX;
+      const fy = camera.y + dist * rayDirY;
+      const u = fx - Math.floor(fx);
+      const v = fy - Math.floor(fy);
+      const texX = Math.min(TEXTURE_SIZE - 1, Math.max(0, Math.floor(u * TEXTURE_SIZE)));
+      const texY = Math.min(TEXTURE_SIZE - 1, Math.max(0, Math.floor(v * TEXTURE_SIZE)));
+      const o = (texY * TEXTURE_SIZE + texX) * 3;
+      bandPixel[band] = packRgb((rgbBuf[o] * fog) | 0, (rgbBuf[o + 1] * fog) | 0, (rgbBuf[o + 2] * fog) | 0);
+    } else {
+      const rgb = flatRgb!;
+      bandPixel[band] = packRgb((rgb[0] * fog) | 0, (rgb[1] * fog) | 0, (rgb[2] * fog) | 0);
+    }
   }
 
   const writeTop = Math.round(Math.max(0, Math.min(screenHeight, clipTop)));
