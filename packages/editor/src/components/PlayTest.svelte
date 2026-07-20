@@ -11,6 +11,7 @@
     playSfx,
     playMusic,
     type Camera,
+    type Billboard,
   } from "@blopple/runtime";
   import { mapStore } from "../lib/mapStore.svelte";
 
@@ -29,6 +30,14 @@
     const player = createPlayerState(map);
     const input = new InputController(canvas);
     input.start();
+
+    // enemies don't move/die yet (that's a later session) — resolve placements to
+    // billboards once, not every frame
+    const billboards: Billboard[] = map.enemies.flatMap((placement: { enemyId: string; x: number; y: number }) => {
+      const def = map.enemyDefs.find((e: { id: string }) => e.id === placement.enemyId);
+      if (!def) return [];
+      return [{ x: placement.x, y: placement.y, textureRef: def.spriteRef, worldWidth: def.width, worldHeight: def.height }];
+    });
 
     const camera: Camera = { x: player.x, y: player.y, angle: player.angle, fov: Math.PI / 3 };
 
@@ -61,7 +70,7 @@
       playMusic(map, player.hasReachedExit ? map.music.outroSongId : map.music.gameplaySongId);
 
       const renderStart = performance.now();
-      renderFrame(ctx, map, camera, canvas.width, canvas.height, player.keys, new Set(player.heldWeaponIds));
+      renderFrame(ctx, map, camera, canvas.width, canvas.height, player.keys, new Set(player.heldWeaponIds), billboards);
       const renderMs = performance.now() - renderStart;
       renderViewmodel(ctx, map, player, canvas.width, canvas.height);
       renderHud(ctx, map, player, canvas.width, canvas.height);

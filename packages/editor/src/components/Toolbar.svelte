@@ -12,6 +12,7 @@
     { id: "door", label: "Door" },
     { id: "key", label: "Key" },
     { id: "weapon", label: "Weapon" },
+    { id: "enemy", label: "Enemy" },
     { id: "exit", label: "Exit" },
     { id: "height", label: "Height" },
     { id: "playerStart", label: "Player Start" },
@@ -65,6 +66,19 @@
     </div>
   {/if}
 
+  {#if toolStore.tool === "enemy"}
+    <div class="group">
+      {#each mapStore.map.enemyDefs as e (e.id)}
+        <button class:active={toolStore.selectedEnemyId === e.id} onclick={() => (toolStore.selectedEnemyId = e.id)}>
+          {e.name}
+        </button>
+      {/each}
+      {#if mapStore.map.enemyDefs.length === 0}
+        <span class="label">no enemies yet — add one in the Enemies tab</span>
+      {/if}
+    </div>
+  {/if}
+
   {#if toolStore.tool === "wall" || toolStore.tool === "floor" || toolStore.tool === "ceiling" || toolStore.tool === "height"}
     <div class="group">
       <button class:active={toolStore.paintMode === "color"} onclick={() => (toolStore.paintMode = "color")}>
@@ -106,7 +120,7 @@
     {/if}
   {/if}
 
-  {#if toolStore.tool !== "playerStart" && toolStore.tool !== "key" && toolStore.tool !== "weapon" && toolStore.tool !== "exit"}
+  {#if toolStore.tool !== "playerStart" && toolStore.tool !== "key" && toolStore.tool !== "weapon" && toolStore.tool !== "enemy" && toolStore.tool !== "exit"}
     <div class="group">
       <span class="label">Brush</span>
       {#each BRUSH_SIZES as size (size)}

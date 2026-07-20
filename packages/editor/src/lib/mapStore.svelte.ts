@@ -1,4 +1,4 @@
-import type { Cell, KeyColor, MapData, TextureDef, Song, AudioTrackDef, Instrument, Pattern, SfxDef, SfxLayer, WeaponDef } from "@blopple/shared";
+import type { Cell, KeyColor, MapData, TextureDef, Song, AudioTrackDef, Instrument, Pattern, SfxDef, SfxLayer, WeaponDef, EnemyDef } from "@blopple/shared";
 import {
   TEXTURE_SCHEMA_VERSION,
   TEXTURE_SIZE,
@@ -6,6 +6,7 @@ import {
   STEPS_PER_PATTERN,
   PLAYER_SCHEMA_VERSION,
   WEAPON_SCHEMA_VERSION,
+  ENEMY_SCHEMA_VERSION,
 } from "@blopple/shared";
 import { INSTRUMENT_PRESETS } from "./musicPresets";
 
@@ -67,6 +68,7 @@ function emptyMap(width: number, height: number): MapData {
     width,
     height,
     cells: buildCells(width, height),
+    enemyDefs: [],
     enemies: [],
     textures: [],
     songs: [],
@@ -123,6 +125,8 @@ class MapStore {
     if (!data.sfx) data.sfx = [];
     if (!data.weapons) data.weapons = [];
     if (!data.weaponPickups) data.weaponPickups = [];
+    if (!data.enemyDefs) data.enemyDefs = [];
+    if (!data.enemies) data.enemies = [];
     if (!data.keyPickups) data.keyPickups = [];
     if (!data.player) {
       data.player = { schemaVersion: PLAYER_SCHEMA_VERSION, health: 100, speed: 3, startingWeaponId: null };
@@ -226,6 +230,49 @@ class MapStore {
   placeWeaponPickup(weaponId: string, x: number, y: number): void {
     this.map.weaponPickups = this.map.weaponPickups.filter((p) => !(Math.floor(p.x) === Math.floor(x) && Math.floor(p.y) === Math.floor(y)));
     this.map.weaponPickups.push({ weaponId, x, y });
+  }
+
+  // --- enemies ---
+
+  enemyAt(id: string): EnemyDef | undefined {
+    return this.map.enemyDefs.find((e) => e.id === id);
+  }
+
+  addEnemy(): EnemyDef {
+    const enemy: EnemyDef = {
+      schemaVersion: ENEMY_SCHEMA_VERSION,
+      id: crypto.randomUUID(),
+      name: `enemy ${this.map.enemyDefs.length + 1}`,
+      health: 50,
+      speed: 1.5,
+      damage: 10,
+      attackRangeCells: 1,
+      width: 0.8,
+      height: 1.2,
+      spriteRef: null,
+    };
+    this.map.enemyDefs.push(enemy);
+    return enemy;
+  }
+
+  duplicateEnemy(id: string): EnemyDef | undefined {
+    const src = this.enemyAt(id);
+    if (!src) return undefined;
+    const copy: EnemyDef = { ...src, id: crypto.randomUUID(), name: `${src.name} copy` };
+    this.map.enemyDefs.push(copy);
+    return copy;
+  }
+
+  removeEnemy(id: string): void {
+    const idx = this.map.enemyDefs.findIndex((e) => e.id === id);
+    if (idx === -1) return;
+    this.map.enemyDefs.splice(idx, 1);
+    this.map.enemies = this.map.enemies.filter((p) => p.enemyId !== id);
+  }
+
+  placeEnemy(enemyId: string, x: number, y: number): void {
+    this.map.enemies = this.map.enemies.filter((p) => !(Math.floor(p.x) === Math.floor(x) && Math.floor(p.y) === Math.floor(y)));
+    this.map.enemies.push({ enemyId, x, y, facing: 0 });
   }
 
   textureAt(id: string): TextureDef | undefined {

@@ -1,6 +1,6 @@
 import type { KeyColor } from "@blopple/shared";
 
-export type Tool = "wall" | "floor" | "ceiling" | "door" | "key" | "weapon" | "exit" | "height" | "playerStart" | "erase";
+export type Tool = "wall" | "floor" | "ceiling" | "door" | "key" | "weapon" | "enemy" | "exit" | "height" | "playerStart" | "erase";
 
 export const BRUSH_SIZES = [1, 3, 5, 7] as const;
 export type BrushSize = (typeof BRUSH_SIZES)[number];
@@ -20,6 +20,9 @@ class ToolStore {
 
   // weapon tool: which weapon's pickup to place
   selectedWeaponId = $state<string | null>(null);
+
+  // enemy tool: which enemy's placement to place
+  selectedEnemyId = $state<string | null>(null);
 
   // wall/floor/ceiling painting: flat color vs. a painted texture
   paintMode = $state<PaintMode>("color");

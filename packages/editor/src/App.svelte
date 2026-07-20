@@ -6,9 +6,10 @@
   import TextureEditor from "./components/TextureEditor.svelte";
   import MusicEditor from "./components/MusicEditor.svelte";
   import WeaponEditor from "./components/WeaponEditor.svelte";
+  import EnemyEditor from "./components/EnemyEditor.svelte";
   import { mapStore } from "./lib/mapStore.svelte";
 
-  type Tab = "map" | "preview" | "play" | "textures" | "music" | "weapons";
+  type Tab = "map" | "preview" | "play" | "textures" | "music" | "weapons" | "enemies";
 
   const tabs: { id: Tab; label: string; enabled: boolean }[] = [
     { id: "map", label: "Tile Map", enabled: true },
@@ -17,6 +18,7 @@
     { id: "textures", label: "Textures", enabled: true },
     { id: "music", label: "Music", enabled: true },
     { id: "weapons", label: "Weapons", enabled: true },
+    { id: "enemies", label: "Enemies", enabled: true },
   ];
 
   let activeTab = $state<Tab>("map");
@@ -97,6 +99,8 @@
     <MusicEditor />
   {:else if activeTab === "weapons"}
     <WeaponEditor />
+  {:else if activeTab === "enemies"}
+    <EnemyEditor />
   {/if}
 </main>
 

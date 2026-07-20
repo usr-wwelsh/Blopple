@@ -1,6 +1,7 @@
 import type { TextureDef } from "./textureSchema";
 import type { Song, SfxDef, MapMusicSettings, AudioTrackDef } from "./musicSchema";
 import type { WeaponDef, WeaponPickup } from "./weaponSchema";
+import type { EnemyDef } from "./enemySchema";
 import type { PlayerDef } from "./playerSchema";
 
 export const SCHEMA_VERSION = 1;
@@ -55,6 +56,7 @@ export interface MapData {
   width: number;
   height: number;
   cells: Cell[];
+  enemyDefs: EnemyDef[];
   enemies: EnemyPlacement[];
   textures: TextureDef[];
   songs: Song[];
