@@ -1,6 +1,6 @@
 import type { MapData } from "@blopple/shared";
 import { renderFrame, type Camera } from "./engine";
-import { renderHud, renderViewmodel, renderExitOverlay } from "./hud";
+import { renderHud, renderViewmodel, renderExitOverlay, renderDeathOverlay } from "./hud";
 import { InputController } from "./input";
 import { createPlayerState, updatePlayer } from "./player";
 import { playSfx, playMusic } from "./audio";
@@ -41,8 +41,9 @@ function loop(now: number): void {
 
   renderFrame(ctx, BLOPPLE_MAP, camera, canvas.width, canvas.height, player.keys, new Set(player.heldWeaponIds));
   renderViewmodel(ctx, BLOPPLE_MAP, player, canvas.width, canvas.height);
-  renderHud(ctx, BLOPPLE_MAP, player, canvas.width, canvas.height);
+  renderHud(ctx, player, canvas.width, canvas.height);
   if (player.hasReachedExit) renderExitOverlay(ctx, BLOPPLE_MAP, canvas.width, canvas.height);
+  else if (player.isDead) renderDeathOverlay(ctx, canvas.width, canvas.height);
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);

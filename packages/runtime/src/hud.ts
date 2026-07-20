@@ -20,7 +20,6 @@ const KEY_SLOT_DIM_BORDER = "#4a4a4a";
  * weapons, held keys) — no ammo/armor sections since there's no ammo tracking yet. */
 export function renderHud(
   ctx: CanvasRenderingContext2D,
-  map: MapData,
   player: PlayerState,
   width: number,
   height: number,
@@ -42,7 +41,7 @@ export function renderHud(
   ctx.textAlign = "left";
   ctx.fillStyle = HEALTH_COLOR;
   ctx.font = `bold ${numberSize}px monospace`;
-  ctx.fillText(`${Math.max(0, Math.round(map.player.health))}%`, pad, barTop + numberSize + pad * 0.3);
+  ctx.fillText(`${Math.max(0, Math.round(player.currentHealth))}%`, pad, barTop + numberSize + pad * 0.3);
 
   ctx.fillStyle = LABEL_COLOR;
   ctx.font = `${labelSize}px monospace`;
@@ -151,18 +150,28 @@ export function renderViewmodel(ctx: CanvasRenderingContext2D, map: MapData, pla
   ctx.drawImage(viewmodelCanvasFor(texture), x, y, size, size);
 }
 
-const EXIT_OVERLAY_BG = "rgba(0, 0, 0, 0.75)";
-const EXIT_OVERLAY_TEXT = "#e8e8e8";
+const OVERLAY_BG = "rgba(0, 0, 0, 0.75)";
+const OVERLAY_TEXT = "#e8e8e8";
+
+function renderOverlay(ctx: CanvasRenderingContext2D, message: string, width: number, height: number): void {
+  ctx.fillStyle = OVERLAY_BG;
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.fillStyle = OVERLAY_TEXT;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `bold ${Math.round(height * 0.08)}px monospace`;
+  ctx.fillText(message, width / 2, height / 2);
+}
 
 /** Full-screen overlay shown once the player reaches map.exit — freezes on top of
  * whatever frame was last rendered (movement is already frozen in updatePlayer). */
 export function renderExitOverlay(ctx: CanvasRenderingContext2D, map: MapData, width: number, height: number): void {
-  ctx.fillStyle = EXIT_OVERLAY_BG;
-  ctx.fillRect(0, 0, width, height);
+  renderOverlay(ctx, map.exit.message, width, height);
+}
 
-  ctx.fillStyle = EXIT_OVERLAY_TEXT;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.font = `bold ${Math.round(height * 0.08)}px monospace`;
-  ctx.fillText(map.exit.message, width / 2, height / 2);
+/** Full-screen overlay shown once currentHealth hits 0 — same freeze-on-top behavior
+ * as renderExitOverlay (movement is already frozen in updatePlayer via isDead). */
+export function renderDeathOverlay(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+  renderOverlay(ctx, "YOU DIED", width, height);
 }

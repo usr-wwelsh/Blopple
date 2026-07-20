@@ -5,6 +5,7 @@
     renderHud,
     renderViewmodel,
     renderExitOverlay,
+    renderDeathOverlay,
     InputController,
     createPlayerState,
     updatePlayer,
@@ -73,8 +74,9 @@
       renderFrame(ctx, map, camera, canvas.width, canvas.height, player.keys, new Set(player.heldWeaponIds), billboards);
       const renderMs = performance.now() - renderStart;
       renderViewmodel(ctx, map, player, canvas.width, canvas.height);
-      renderHud(ctx, map, player, canvas.width, canvas.height);
+      renderHud(ctx, player, canvas.width, canvas.height);
       if (player.hasReachedExit) renderExitOverlay(ctx, map, canvas.width, canvas.height);
+      else if (player.isDead) renderDeathOverlay(ctx, canvas.width, canvas.height);
 
       if (debugOverlay) {
         frameMsEma = frameMsEma === 0 ? rawFrameMs : frameMsEma + (rawFrameMs - frameMsEma) * EMA_ALPHA;

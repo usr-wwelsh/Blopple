@@ -24,6 +24,8 @@ export interface PlayerState {
   viewmodelFlashMs: number;
   /** true only on the exact frame a shot was fired — callers use this to trigger the fire sfx */
   justFired: boolean;
+  currentHealth: number;
+  isDead: boolean;
 }
 
 export function createPlayerState(map: MapData): PlayerState {
@@ -39,7 +41,17 @@ export function createPlayerState(map: MapData): PlayerState {
     fireCooldownMs: 0,
     viewmodelFlashMs: 0,
     justFired: false,
+    currentHealth: map.player.health,
+    isDead: false,
   };
+}
+
+/** Reduces currentHealth and marks the player dead at 0 — the sink weapon hit
+ * resolution and enemy attacks (both later sessions) will call into. */
+export function damagePlayer(state: PlayerState, amount: number): void {
+  if (state.isDead || state.hasReachedExit) return;
+  state.currentHealth = Math.max(0, state.currentHealth - amount);
+  if (state.currentHealth <= 0) state.isDead = true;
 }
 
 /** Permanently opens a locked door at (x, y) if it matches a key the player holds —
@@ -80,7 +92,7 @@ function tryMove(
 
 export function updatePlayer(state: PlayerState, map: MapData, player: PlayerDef, input: InputState, dt: number): void {
   state.justFired = false;
-  if (state.hasReachedExit) return;
+  if (state.hasReachedExit || state.isDead) return;
 
   state.fireCooldownMs = Math.max(0, state.fireCooldownMs - dt * 1000);
   state.viewmodelFlashMs = Math.max(0, state.viewmodelFlashMs - dt * 1000);
