@@ -128,6 +128,13 @@ export function updateProjectiles(
   for (let i = projectiles.length - 1; i >= 0; i--) {
     const p = projectiles[i];
     const step = Math.min(p.speed * dt, p.remainingRange);
+    if (step <= 0) {
+      // zero/negative speed (e.g. an enemy def with no projectileSpeed set) would
+      // otherwise never move and never satisfy any despawn condition below, leaking
+      // one more of these every attack cooldown for as long as the player stays in range
+      projectiles.splice(i, 1);
+      continue;
+    }
 
     let travel = raycastWallDistance(map, p.x, p.y, p.dirX, p.dirY, step);
     let hitEnemy: EnemyInstance | null = null;
