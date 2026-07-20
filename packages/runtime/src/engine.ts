@@ -66,6 +66,48 @@ export function floorHeightAt(map: MapData, x: number, y: number): HeightLevel {
   return cellAt(map, x, y)?.height ?? 0;
 }
 
+/** Lightweight DDA grid march for a single arbitrary ray (hitscan/projectile use, not
+ * rendering) — unlike castColumn, dirX/dirY here is expected to be a unit vector, so the
+ * returned distance is true Euclidean distance, and there's no per-step height/side
+ * bookkeeping since callers only care where the ray first goes solid. */
+export function raycastWallDistance(
+  map: MapData,
+  x: number,
+  y: number,
+  dirX: number,
+  dirY: number,
+  maxDist: number,
+): number {
+  let mapX = Math.floor(x);
+  let mapY = Math.floor(y);
+
+  const deltaDistX = dirX === 0 ? Infinity : Math.abs(1 / dirX);
+  const deltaDistY = dirY === 0 ? Infinity : Math.abs(1 / dirY);
+
+  const stepX = dirX < 0 ? -1 : 1;
+  const stepY = dirY < 0 ? -1 : 1;
+
+  let sideDistX = dirX < 0 ? (x - mapX) * deltaDistX : (mapX + 1 - x) * deltaDistX;
+  let sideDistY = dirY < 0 ? (y - mapY) * deltaDistY : (mapY + 1 - y) * deltaDistY;
+
+  const maxSteps = map.width + map.height;
+  for (let i = 0; i < maxSteps; i++) {
+    let dist: number;
+    if (sideDistX < sideDistY) {
+      dist = sideDistX;
+      sideDistX += deltaDistX;
+      mapX += stepX;
+    } else {
+      dist = sideDistY;
+      sideDistY += deltaDistY;
+      mapY += stepY;
+    }
+    if (dist > maxDist) return maxDist;
+    if (isSolid(map, mapX, mapY)) return dist;
+  }
+  return maxDist;
+}
+
 // x/y -> KeyPickup, memoized per map object like cellIndexFor — only rebuilt if map.keyPickups.length
 // changes (a pickup is removed from *rendering* by heldKeys, never by mutating this array).
 const keyPickupIndexCache = new WeakMap<MapData, { size: number; index: Map<string, KeyPickup> }>();
@@ -111,6 +153,9 @@ export interface Billboard {
   /** world units, stands on the floor of its cell — see floorHeightAt in renderBillboards */
   worldWidth: number;
   worldHeight: number;
+  /** blends the rendered pixel toward `color` by `strength` (0-1) before fog is applied —
+   * used for transient effects like a hit flash; omit/null for no tint. */
+  tint?: { color: string; strength: number } | null;
 }
 
 interface StepHit {
@@ -811,6 +856,8 @@ function writeBillboardColumn(
   yTop: number,
   yBottom: number,
   dist: number,
+  tintRgb: [number, number, number] | null,
+  tintStrength: number,
 ): void {
   const span = yBottom - yTop;
   if (span <= 0) return;
@@ -826,7 +873,15 @@ function writeBillboardColumn(
     const hex = texture.pixels[row * TEXTURE_SIZE + texX];
     if (hex === null) continue;
     const rgb = hexToRgb(hex);
-    buf32[y * bufWidth + col] = packRgb((rgb[0] * fog) | 0, (rgb[1] * fog) | 0, (rgb[2] * fog) | 0);
+    let r = rgb[0];
+    let g = rgb[1];
+    let b = rgb[2];
+    if (tintRgb) {
+      r += (tintRgb[0] - r) * tintStrength;
+      g += (tintRgb[1] - g) * tintStrength;
+      b += (tintRgb[2] - b) * tintStrength;
+    }
+    buf32[y * bufWidth + col] = packRgb((r * fog) | 0, (g * fog) | 0, (b * fog) | 0);
   }
 }
 
@@ -891,10 +946,18 @@ function renderBillboards(
     const yTop = projectY(cellFloorY + billboard.worldHeight, eyeY, centerY, scale);
     const yBottom = projectY(cellFloorY, eyeY, centerY, scale);
 
+    const tintRgb = billboard.tint ? hexToRgb(billboard.tint.color) : null;
+    const tintStrength = billboard.tint?.strength ?? 0;
+
     if (parsed.kind === "color") {
-      const rgb = hexToRgb(parsed.color);
+      let [r, g, b] = hexToRgb(parsed.color);
+      if (tintRgb) {
+        r += (tintRgb[0] - r) * tintStrength;
+        g += (tintRgb[1] - g) * tintStrength;
+        b += (tintRgb[2] - b) * tintStrength;
+      }
       const fog = Math.max(0, 1 - dist / MAX_RENDER_DIST);
-      const pixel = packRgb((rgb[0] * fog) | 0, (rgb[1] * fog) | 0, (rgb[2] * fog) | 0);
+      const pixel = packRgb((r * fog) | 0, (g * fog) | 0, (b * fog) | 0);
       const top = Math.max(0, Math.round(yTop));
       const bottom = Math.min(screenHeight, Math.round(yBottom));
       if (bottom <= top) continue;
@@ -913,7 +976,7 @@ function renderBillboards(
       let texX = Math.floor(((col - leftPx) / widthPx) * TEXTURE_SIZE);
       if (texX < 0) texX = 0;
       else if (texX >= TEXTURE_SIZE) texX = TEXTURE_SIZE - 1;
-      writeBillboardColumn(buf32, bufWidth, screenHeight, col, texture, texX, yTop, yBottom, dist);
+      writeBillboardColumn(buf32, bufWidth, screenHeight, col, texture, texX, yTop, yBottom, dist, tintRgb, tintStrength);
     }
   }
 }

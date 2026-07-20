@@ -9,10 +9,16 @@
     InputController,
     createPlayerState,
     updatePlayer,
+    createEnemyInstances,
+    updateEnemies,
+    enemyBillboards,
+    fireWeapon,
+    updateProjectiles,
+    projectileBillboards,
     playSfx,
     playMusic,
     type Camera,
-    type Billboard,
+    type Projectile,
   } from "@blopple/runtime";
   import { mapStore } from "../lib/mapStore.svelte";
 
@@ -32,13 +38,10 @@
     const input = new InputController(canvas);
     input.start();
 
-    // enemies don't move/die yet (that's a later session) — resolve placements to
-    // billboards once, not every frame
-    const billboards: Billboard[] = map.enemies.flatMap((placement: { enemyId: string; x: number; y: number }) => {
-      const def = map.enemyDefs.find((e: { id: string }) => e.id === placement.enemyId);
-      if (!def) return [];
-      return [{ x: placement.x, y: placement.y, textureRef: def.spriteRef, worldWidth: def.width, worldHeight: def.height }];
-    });
+    // enemies don't move/attack yet (that's a later session) — only health/death from
+    // weapon hits, resolved fresh into billboards each frame so dead ones drop out
+    const enemies = createEnemyInstances(map);
+    const projectiles: Projectile[] = [];
 
     const camera: Camera = { x: player.x, y: player.y, angle: player.angle, fov: Math.PI / 3 };
 
@@ -66,10 +69,14 @@
 
       if (player.justFired) {
         const weapon = map.weapons.find((w) => w.id === player.heldWeaponIds[player.equippedIndex]);
+        if (weapon) fireWeapon(map, player, weapon, enemies, projectiles);
         playSfx(map, weapon?.sfxId ?? null);
       }
+      updateProjectiles(map, projectiles, enemies, dt);
+      updateEnemies(enemies, dt);
       playMusic(map, player.hasReachedExit ? map.music.outroSongId : map.music.gameplaySongId);
 
+      const billboards = [...enemyBillboards(enemies), ...projectileBillboards(projectiles)];
       const renderStart = performance.now();
       renderFrame(ctx, map, camera, canvas.width, canvas.height, player.keys, new Set(player.heldWeaponIds), billboards);
       const renderMs = performance.now() - renderStart;

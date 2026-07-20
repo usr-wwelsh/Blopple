@@ -1,8 +1,12 @@
-export { renderFrame, isSolid, cellAt, floorHeightAt, HEIGHT_STEP, CEILING_Y, EYE_OFFSET } from "./engine";
+export { renderFrame, isSolid, cellAt, floorHeightAt, raycastWallDistance, HEIGHT_STEP, CEILING_Y, EYE_OFFSET } from "./engine";
 export type { Camera, Billboard } from "./engine";
 export { renderHud, renderViewmodel, renderExitOverlay, renderDeathOverlay } from "./hud";
 export { InputController } from "./input";
 export type { InputState } from "./input";
 export { createPlayerState, updatePlayer, damagePlayer } from "./player";
 export type { PlayerState } from "./player";
+export { createEnemyInstances, damageEnemy, updateEnemies, enemyBillboards } from "./enemies";
+export type { EnemyInstance } from "./enemies";
+export { fireWeapon, updateProjectiles, projectileBillboards } from "./combat";
+export type { Projectile } from "./combat";
 export { playSfx, playMusic } from "./audio";

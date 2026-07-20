@@ -3,6 +3,8 @@ import { renderFrame, type Camera } from "./engine";
 import { renderHud, renderViewmodel, renderExitOverlay, renderDeathOverlay } from "./hud";
 import { InputController } from "./input";
 import { createPlayerState, updatePlayer } from "./player";
+import { createEnemyInstances, updateEnemies, enemyBillboards } from "./enemies";
+import { fireWeapon, updateProjectiles, projectileBillboards, type Projectile } from "./combat";
 import { playSfx, playMusic } from "./audio";
 
 // injected by the export step as a <script> before this bundle
@@ -18,6 +20,8 @@ document.body.appendChild(canvas);
 const ctx = canvas.getContext("2d")!;
 
 const player = createPlayerState(BLOPPLE_MAP);
+const enemies = createEnemyInstances(BLOPPLE_MAP);
+const projectiles: Projectile[] = [];
 const input = new InputController(canvas);
 input.start();
 
@@ -35,11 +39,15 @@ function loop(now: number): void {
 
   if (player.justFired) {
     const weapon = BLOPPLE_MAP.weapons.find((w) => w.id === player.heldWeaponIds[player.equippedIndex]);
+    if (weapon) fireWeapon(BLOPPLE_MAP, player, weapon, enemies, projectiles);
     playSfx(BLOPPLE_MAP, weapon?.sfxId ?? null);
   }
+  updateProjectiles(BLOPPLE_MAP, projectiles, enemies, dt);
+  updateEnemies(enemies, dt);
   playMusic(BLOPPLE_MAP, player.hasReachedExit ? BLOPPLE_MAP.music.outroSongId : BLOPPLE_MAP.music.gameplaySongId);
 
-  renderFrame(ctx, BLOPPLE_MAP, camera, canvas.width, canvas.height, player.keys, new Set(player.heldWeaponIds));
+  const billboards = [...enemyBillboards(enemies), ...projectileBillboards(projectiles)];
+  renderFrame(ctx, BLOPPLE_MAP, camera, canvas.width, canvas.height, player.keys, new Set(player.heldWeaponIds), billboards);
   renderViewmodel(ctx, BLOPPLE_MAP, player, canvas.width, canvas.height);
   renderHud(ctx, player, canvas.width, canvas.height);
   if (player.hasReachedExit) renderExitOverlay(ctx, BLOPPLE_MAP, canvas.width, canvas.height);
