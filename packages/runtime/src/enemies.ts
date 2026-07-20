@@ -1,9 +1,12 @@
-import type { MapData } from "@blopple/shared";
+import type { EnemyBehavior, MapData } from "@blopple/shared";
 import { isSolid, raycastWallDistance, type Billboard } from "./engine";
 import { damagePlayer, type PlayerState } from "./player";
+import type { Projectile } from "./combat";
 
 const HIT_FLASH_MS = 150;
 const HIT_FLASH_COLOR = "#ff2020";
+// how far inside its attack range a "ranged" enemy lets the player get before backing off
+const RANGED_RETREAT_FRACTION = 0.5;
 
 /** Per-placement runtime state resolved from map.enemies + map.enemyDefs. */
 export interface EnemyInstance {
@@ -17,10 +20,15 @@ export interface EnemyInstance {
   spriteRef: string | null;
   /** counts down from HIT_FLASH_MS after a hit — drives the red pulse in enemyBillboards */
   hitFlashMs: number;
+  behavior: EnemyBehavior;
   speed: number;
   damage: number;
   attackRangeCells: number;
   attackRateMs: number;
+  detectionRangeCells: number;
+  /** only meaningful when behavior === "stationary" */
+  projectileSpeed: number | null;
+  projectileSpriteRef: string | null;
   /** counts down from attackRateMs after landing an attack, mirrors PlayerState.fireCooldownMs */
   attackCooldownMs: number;
 }
@@ -40,10 +48,14 @@ export function createEnemyInstances(map: MapData): EnemyInstance[] {
         height: def.height,
         spriteRef: def.spriteRef,
         hitFlashMs: 0,
+        behavior: def.behavior,
         speed: def.speed,
         damage: def.damage,
         attackRangeCells: def.attackRangeCells,
         attackRateMs: def.attackRateMs,
+        detectionRangeCells: def.detectionRangeCells,
+        projectileSpeed: def.projectileSpeed,
+        projectileSpriteRef: def.projectileSpriteRef,
         attackCooldownMs: 0,
       },
     ];
@@ -68,13 +80,22 @@ function tryMoveEnemy(map: MapData, x: number, y: number, dx: number, dy: number
   return { x: nx, y: ny };
 }
 
-/** Every living enemy always knows where the player is (no stealth/detection radius —
- * not in scope yet, see AI behavior templates on the roadmap) and either closes the
- * distance or attacks on cooldown once in range. A wall between enemy and player blocks
- * both movement-toward and attacking, checked via the same raycastWallDistance helper
- * combat.ts uses for hitscan. No pathfinding: an enemy on the wrong side of a wall just
- * stops advancing until line of sight opens up. */
-export function updateEnemyAI(enemies: EnemyInstance[], map: MapData, player: PlayerState, dt: number): void {
+/** An enemy only reacts once the player is within detectionRangeCells AND in line of
+ * sight (checked via the same raycastWallDistance helper combat.ts uses for hitscan) —
+ * hide behind a wall and it stays idle even if you're close. Once aware, behavior
+ * branches: "chase" closes distance and melee-attacks in range; "stationary" never
+ * moves and fires a projectile (via combat.ts's updateProjectiles) at anything that
+ * wanders into range (turret/sentry); "ranged" holds/melee-attacks from range and backs
+ * off if the player closes inside RANGED_RETREAT_FRACTION of that range (kiting). No
+ * pathfinding in any case: an enemy on the wrong side of a wall just stops advancing
+ * (or retreating) until line of sight opens up. */
+export function updateEnemyAI(
+  enemies: EnemyInstance[],
+  map: MapData,
+  player: PlayerState,
+  projectiles: Projectile[],
+  dt: number,
+): void {
   if (player.isDead || player.hasReachedExit) return;
 
   for (const enemy of enemies) {
@@ -84,21 +105,50 @@ export function updateEnemyAI(enemies: EnemyInstance[], map: MapData, player: Pl
     const dx = player.x - enemy.x;
     const dy = player.y - enemy.y;
     const dist = Math.hypot(dx, dy);
-    if (dist <= 0) continue;
+    if (dist <= 0 || dist > enemy.detectionRangeCells) continue;
 
     const dirX = dx / dist;
     const dirY = dy / dist;
     const hasLineOfSight = raycastWallDistance(map, enemy.x, enemy.y, dirX, dirY, dist) >= dist;
     if (!hasLineOfSight) continue;
 
-    if (dist > enemy.attackRangeCells) {
-      const step = Math.min(enemy.speed * dt, dist - enemy.attackRangeCells);
-      const moved = tryMoveEnemy(map, enemy.x, enemy.y, dirX * step, dirY * step, enemy.width / 2);
+    const inAttackRange = dist <= enemy.attackRangeCells;
+    if (inAttackRange && enemy.attackCooldownMs <= 0) {
+      if (enemy.behavior === "stationary") {
+        projectiles.push({
+          x: enemy.x,
+          y: enemy.y,
+          dirX,
+          dirY,
+          speed: enemy.projectileSpeed ?? 0,
+          remainingRange: enemy.attackRangeCells,
+          damage: enemy.damage,
+          spriteRef: enemy.projectileSpriteRef,
+          source: "enemy",
+        });
+      } else {
+        damagePlayer(player, enemy.damage);
+      }
+      enemy.attackCooldownMs = enemy.attackRateMs;
+    }
+
+    if (enemy.behavior === "stationary") continue;
+
+    let moveDirX = dirX;
+    let moveDirY = dirY;
+    let step = 0;
+    if (enemy.behavior === "ranged" && dist < enemy.attackRangeCells * RANGED_RETREAT_FRACTION) {
+      moveDirX = -dirX;
+      moveDirY = -dirY;
+      step = enemy.speed * dt;
+    } else if (!inAttackRange) {
+      step = Math.min(enemy.speed * dt, dist - enemy.attackRangeCells);
+    }
+
+    if (step > 0) {
+      const moved = tryMoveEnemy(map, enemy.x, enemy.y, moveDirX * step, moveDirY * step, enemy.width / 2);
       enemy.x = moved.x;
       enemy.y = moved.y;
-    } else if (enemy.attackCooldownMs <= 0) {
-      damagePlayer(player, enemy.damage);
-      enemy.attackCooldownMs = enemy.attackRateMs;
     }
   }
 }

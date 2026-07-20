@@ -42,8 +42,8 @@ function loop(now: number): void {
     if (weapon) fireWeapon(BLOPPLE_MAP, player, weapon, enemies, projectiles);
     playSfx(BLOPPLE_MAP, weapon?.sfxId ?? null);
   }
-  updateProjectiles(BLOPPLE_MAP, projectiles, enemies, dt);
-  updateEnemyAI(enemies, BLOPPLE_MAP, player, dt);
+  updateProjectiles(BLOPPLE_MAP, projectiles, enemies, player, dt);
+  updateEnemyAI(enemies, BLOPPLE_MAP, player, projectiles, dt);
   updateEnemies(enemies, dt);
   playMusic(BLOPPLE_MAP, player.hasReachedExit ? BLOPPLE_MAP.music.outroSongId : BLOPPLE_MAP.music.gameplaySongId);
 

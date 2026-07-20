@@ -1,11 +1,12 @@
 import type { MapData, WeaponDef } from "@blopple/shared";
 import { raycastWallDistance, type Billboard } from "./engine";
-import type { PlayerState } from "./player";
+import { damagePlayer, type PlayerState } from "./player";
 import { damageEnemy, type EnemyInstance } from "./enemies";
 
 const MELEE_CONE_HALF_ANGLE = Math.PI / 6;
 const HITSCAN_HIT_RADIUS = 0.4;
 const PROJECTILE_HIT_RADIUS = 0.35;
+const ENEMY_PROJECTILE_HIT_RADIUS = 0.4;
 const PROJECTILE_VISUAL_SIZE = 0.15;
 // fallback when a weapon has no projectileSpriteRef set, so in-flight shots stay visible
 const PROJECTILE_COLOR_REF = "color:#ffcc00";
@@ -19,6 +20,9 @@ export interface Projectile {
   remainingRange: number;
   damage: number;
   spriteRef: string | null;
+  /** "player" shots damage enemies (fireWeapon); "enemy" shots (stationary behavior,
+   * see enemies.ts's updateEnemyAI) damage the player instead. */
+  source: "player" | "enemy";
 }
 
 function normalizeAngle(a: number): number {
@@ -102,19 +106,23 @@ export function fireWeapon(
         remainingRange: weapon.rangeCells,
         damage: weapon.damage,
         spriteRef: weapon.projectileSpriteRef,
+        source: "player",
       });
       break;
     }
   }
 }
 
-/** Advances in-flight projectiles one dt, resolving wall/enemy collisions along the
+/** Advances in-flight projectiles one dt, resolving wall/target collisions along the
  * whole step (not just a point check at the new position) so a fast projectile can't
- * tunnel past an enemy standing between this frame's start and end point. */
+ * tunnel past a target standing between this frame's start and end point. "player"-
+ * sourced projectiles test against enemies (fireWeapon's projectile weapons); "enemy"-
+ * sourced ones (stationary enemies, see enemies.ts) test against the player instead. */
 export function updateProjectiles(
   map: MapData,
   projectiles: Projectile[],
   enemies: EnemyInstance[],
+  player: PlayerState,
   dt: number,
 ): void {
   for (let i = projectiles.length - 1; i >= 0; i--) {
@@ -123,16 +131,29 @@ export function updateProjectiles(
 
     let travel = raycastWallDistance(map, p.x, p.y, p.dirX, p.dirY, step);
     let hitEnemy: EnemyInstance | null = null;
-    for (const enemy of enemies) {
-      if (enemy.isDead) continue;
-      const ex = enemy.x - p.x;
-      const ey = enemy.y - p.y;
+    let hitPlayer = false;
+
+    if (p.source === "player") {
+      for (const enemy of enemies) {
+        if (enemy.isDead) continue;
+        const ex = enemy.x - p.x;
+        const ey = enemy.y - p.y;
+        const t = ex * p.dirX + ey * p.dirY;
+        if (t < 0 || t > travel) continue;
+        const perp = Math.abs(ex * p.dirY - ey * p.dirX);
+        if (perp > PROJECTILE_HIT_RADIUS) continue;
+        travel = t;
+        hitEnemy = enemy;
+      }
+    } else {
+      const ex = player.x - p.x;
+      const ey = player.y - p.y;
       const t = ex * p.dirX + ey * p.dirY;
-      if (t < 0 || t > travel) continue;
       const perp = Math.abs(ex * p.dirY - ey * p.dirX);
-      if (perp > PROJECTILE_HIT_RADIUS) continue;
-      travel = t;
-      hitEnemy = enemy;
+      if (t >= 0 && t <= travel && perp <= ENEMY_PROJECTILE_HIT_RADIUS) {
+        travel = t;
+        hitPlayer = true;
+      }
     }
 
     p.x += p.dirX * travel;
@@ -141,6 +162,9 @@ export function updateProjectiles(
 
     if (hitEnemy) {
       damageEnemy(hitEnemy, p.damage);
+      projectiles.splice(i, 1);
+    } else if (hitPlayer) {
+      damagePlayer(player, p.damage);
       projectiles.splice(i, 1);
     } else if (travel < step || p.remainingRange <= 0) {
       projectiles.splice(i, 1);

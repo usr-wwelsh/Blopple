@@ -1,7 +1,10 @@
 <script lang="ts">
+  import type { EnemyBehavior } from "@blopple/shared";
   import { parseTextureRef } from "@blopple/shared";
   import { mapStore } from "../lib/mapStore.svelte";
   import TextureThumb from "./TextureThumb.svelte";
+
+  const behaviors: EnemyBehavior[] = ["chase", "stationary", "ranged"];
 
   let editingId = $state<string | null>(mapStore.map.enemyDefs[0]?.id ?? null);
   const editing = $derived(editingId ? mapStore.enemyAt(editingId) : undefined);
@@ -58,6 +61,21 @@
         <input type="number" min="1" bind:value={editing.health} />
       </label>
       <label class="row">
+        Behavior
+        <select
+          value={editing.behavior}
+          onchange={(e) => {
+            if (!editing) return;
+            editing.behavior = (e.target as HTMLSelectElement).value as EnemyBehavior;
+            if (editing.behavior === "stationary" && editing.projectileSpeed === null) editing.projectileSpeed = 5;
+          }}
+        >
+          {#each behaviors as b (b)}
+            <option value={b}>{b}</option>
+          {/each}
+        </select>
+      </label>
+      <label class="row">
         Speed (cells/sec)
         <input type="number" min="0.1" step="0.1" bind:value={editing.speed} />
       </label>
@@ -73,6 +91,22 @@
         Attack rate (ms)
         <input type="number" min="1" step="50" bind:value={editing.attackRateMs} />
       </label>
+      <label class="row">
+        Detection range (cells)
+        <input type="number" min="0" step="0.5" bind:value={editing.detectionRangeCells} />
+      </label>
+      {#if editing.behavior === "stationary"}
+        <label class="row">
+          Projectile speed (cells/sec)
+          <input
+            type="number"
+            min="0"
+            step="0.5"
+            value={editing.projectileSpeed ?? 0}
+            oninput={(e) => editing && (editing.projectileSpeed = Number((e.target as HTMLInputElement).value))}
+          />
+        </label>
+      {/if}
       <label class="row">
         Width (cells)
         <input type="number" min="0.1" step="0.1" bind:value={editing.width} />
@@ -108,6 +142,35 @@
           <span class="hint">no textures yet — paint one in the Textures tab</span>
         {/if}
       </div>
+
+      {#if editing.behavior === "stationary"}
+        <div class="sprite-picker">
+          <span class="section-label">Projectile sprite</span>
+          <div class="tex-grid">
+            <button
+              class="tex-swatch none"
+              class:active={!editing.projectileSpriteRef}
+              onclick={() => editing && (editing.projectileSpriteRef = null)}
+              aria-label="none"
+            >
+              none
+            </button>
+            {#each mapStore.map.textures as t (t.id)}
+              <button
+                class="tex-swatch"
+                class:active={spriteRefId(editing.projectileSpriteRef) === t.id}
+                onclick={() => editing && (editing.projectileSpriteRef = `texture:${t.id}`)}
+                aria-label={t.name}
+              >
+                <TextureThumb texture={t} size={28} />
+              </button>
+            {/each}
+          </div>
+          {#if mapStore.map.textures.length === 0}
+            <span class="hint">no textures yet — paint one in the Textures tab</span>
+          {/if}
+        </div>
+      {/if}
     {:else}
       <p class="hint">Select or create an enemy to edit it.</p>
     {/if}
