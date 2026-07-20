@@ -5,7 +5,7 @@ export { InputController } from "./input";
 export type { InputState } from "./input";
 export { createPlayerState, updatePlayer, damagePlayer } from "./player";
 export type { PlayerState } from "./player";
-export { createEnemyInstances, damageEnemy, updateEnemies, enemyBillboards } from "./enemies";
+export { createEnemyInstances, damageEnemy, updateEnemies, updateEnemyAI, enemyBillboards } from "./enemies";
 export type { EnemyInstance } from "./enemies";
 export { fireWeapon, updateProjectiles, projectileBillboards } from "./combat";
 export type { Projectile } from "./combat";

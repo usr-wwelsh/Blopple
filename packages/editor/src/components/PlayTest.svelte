@@ -11,6 +11,7 @@
     updatePlayer,
     createEnemyInstances,
     updateEnemies,
+    updateEnemyAI,
     enemyBillboards,
     fireWeapon,
     updateProjectiles,
@@ -38,8 +39,7 @@
     const input = new InputController(canvas);
     input.start();
 
-    // enemies don't move/attack yet (that's a later session) — only health/death from
-    // weapon hits, resolved fresh into billboards each frame so dead ones drop out
+    // resolved fresh into billboards each frame so dead ones drop out
     const enemies = createEnemyInstances(map);
     const projectiles: Projectile[] = [];
 
@@ -73,6 +73,7 @@
         playSfx(map, weapon?.sfxId ?? null);
       }
       updateProjectiles(map, projectiles, enemies, dt);
+      updateEnemyAI(enemies, map, player, dt);
       updateEnemies(enemies, dt);
       playMusic(map, player.hasReachedExit ? map.music.outroSongId : map.music.gameplaySongId);
 

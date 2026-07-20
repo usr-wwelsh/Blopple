@@ -70,6 +70,10 @@
         <input type="number" min="0" step="0.5" bind:value={editing.attackRangeCells} />
       </label>
       <label class="row">
+        Attack rate (ms)
+        <input type="number" min="1" step="50" bind:value={editing.attackRateMs} />
+      </label>
+      <label class="row">
         Width (cells)
         <input type="number" min="0.1" step="0.1" bind:value={editing.width} />
       </label>

@@ -1,11 +1,11 @@
 import type { MapData } from "@blopple/shared";
-import type { Billboard } from "./engine";
+import { isSolid, raycastWallDistance, type Billboard } from "./engine";
+import { damagePlayer, type PlayerState } from "./player";
 
 const HIT_FLASH_MS = 150;
 const HIT_FLASH_COLOR = "#ff2020";
 
-/** Per-placement runtime state resolved from map.enemies + map.enemyDefs. Movement/AI
- * are a later session — this is just enough state for weapon hits to land somewhere. */
+/** Per-placement runtime state resolved from map.enemies + map.enemyDefs. */
 export interface EnemyInstance {
   enemyId: string;
   x: number;
@@ -17,6 +17,12 @@ export interface EnemyInstance {
   spriteRef: string | null;
   /** counts down from HIT_FLASH_MS after a hit — drives the red pulse in enemyBillboards */
   hitFlashMs: number;
+  speed: number;
+  damage: number;
+  attackRangeCells: number;
+  attackRateMs: number;
+  /** counts down from attackRateMs after landing an attack, mirrors PlayerState.fireCooldownMs */
+  attackCooldownMs: number;
 }
 
 export function createEnemyInstances(map: MapData): EnemyInstance[] {
@@ -34,9 +40,67 @@ export function createEnemyInstances(map: MapData): EnemyInstance[] {
         height: def.height,
         spriteRef: def.spriteRef,
         hitFlashMs: 0,
+        speed: def.speed,
+        damage: def.damage,
+        attackRangeCells: def.attackRangeCells,
+        attackRateMs: def.attackRateMs,
+        attackCooldownMs: 0,
       },
     ];
   });
+}
+
+/** Per-axis clamped slide against walls, same shape as player.ts's tryMove but with
+ * no door-unlock side effect — enemies don't carry keys. */
+function tryMoveEnemy(map: MapData, x: number, y: number, dx: number, dy: number, radius: number): { x: number; y: number } {
+  let nx = x;
+  let ny = y;
+  if (dx !== 0) {
+    const testX = x + dx;
+    const edge = dx > 0 ? radius : -radius;
+    if (!isSolid(map, testX + edge, y)) nx = testX;
+  }
+  if (dy !== 0) {
+    const testY = y + dy;
+    const edge = dy > 0 ? radius : -radius;
+    if (!isSolid(map, nx, testY + edge)) ny = testY;
+  }
+  return { x: nx, y: ny };
+}
+
+/** Every living enemy always knows where the player is (no stealth/detection radius —
+ * not in scope yet, see AI behavior templates on the roadmap) and either closes the
+ * distance or attacks on cooldown once in range. A wall between enemy and player blocks
+ * both movement-toward and attacking, checked via the same raycastWallDistance helper
+ * combat.ts uses for hitscan. No pathfinding: an enemy on the wrong side of a wall just
+ * stops advancing until line of sight opens up. */
+export function updateEnemyAI(enemies: EnemyInstance[], map: MapData, player: PlayerState, dt: number): void {
+  if (player.isDead || player.hasReachedExit) return;
+
+  for (const enemy of enemies) {
+    if (enemy.isDead) continue;
+    if (enemy.attackCooldownMs > 0) enemy.attackCooldownMs = Math.max(0, enemy.attackCooldownMs - dt * 1000);
+
+    const dx = player.x - enemy.x;
+    const dy = player.y - enemy.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist <= 0) continue;
+
+    const dirX = dx / dist;
+    const dirY = dy / dist;
+    const hasLineOfSight = raycastWallDistance(map, enemy.x, enemy.y, dirX, dirY, dist) >= dist;
+    if (!hasLineOfSight) continue;
+
+    if (dist > enemy.attackRangeCells) {
+      const step = Math.min(enemy.speed * dt, dist - enemy.attackRangeCells);
+      const moved = tryMoveEnemy(map, enemy.x, enemy.y, dirX * step, dirY * step, enemy.width / 2);
+      enemy.x = moved.x;
+      enemy.y = moved.y;
+    } else if (enemy.attackCooldownMs <= 0) {
+      damagePlayer(player, enemy.damage);
+      enemy.attackCooldownMs = enemy.attackRateMs;
+    }
+  }
 }
 
 /** Mirrors player.ts's damagePlayer: clamp at 0, flip isDead, no-op once dead. */

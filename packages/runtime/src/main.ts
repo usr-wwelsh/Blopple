@@ -3,7 +3,7 @@ import { renderFrame, type Camera } from "./engine";
 import { renderHud, renderViewmodel, renderExitOverlay, renderDeathOverlay } from "./hud";
 import { InputController } from "./input";
 import { createPlayerState, updatePlayer } from "./player";
-import { createEnemyInstances, updateEnemies, enemyBillboards } from "./enemies";
+import { createEnemyInstances, updateEnemies, updateEnemyAI, enemyBillboards } from "./enemies";
 import { fireWeapon, updateProjectiles, projectileBillboards, type Projectile } from "./combat";
 import { playSfx, playMusic } from "./audio";
 
@@ -43,6 +43,7 @@ function loop(now: number): void {
     playSfx(BLOPPLE_MAP, weapon?.sfxId ?? null);
   }
   updateProjectiles(BLOPPLE_MAP, projectiles, enemies, dt);
+  updateEnemyAI(enemies, BLOPPLE_MAP, player, dt);
   updateEnemies(enemies, dt);
   playMusic(BLOPPLE_MAP, player.hasReachedExit ? BLOPPLE_MAP.music.outroSongId : BLOPPLE_MAP.music.gameplaySongId);
 

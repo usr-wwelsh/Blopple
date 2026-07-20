@@ -9,6 +9,8 @@ export interface EnemyDef {
   speed: number;
   damage: number;
   attackRangeCells: number;
+  /** cooldown between attacks once in range, same convention as WeaponDef.fireRateMs */
+  attackRateMs: number;
   /** billboard size in world units (cells) */
   width: number;
   height: number;

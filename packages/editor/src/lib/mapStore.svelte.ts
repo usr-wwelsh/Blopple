@@ -247,6 +247,7 @@ class MapStore {
       speed: 1.5,
       damage: 10,
       attackRangeCells: 1,
+      attackRateMs: 1000,
       width: 0.8,
       height: 1.2,
       spriteRef: null,
