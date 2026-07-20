@@ -81,7 +81,14 @@
 
       <label class="row">
         Behavior
-        <select bind:value={editing.behavior}>
+        <select
+          value={editing.behavior}
+          onchange={(e) => {
+            if (!editing) return;
+            editing.behavior = (e.target as HTMLSelectElement).value as WeaponBehavior;
+            if (editing.behavior === "projectile" && editing.projectileSpeed === null) editing.projectileSpeed = 5;
+          }}
+        >
           {#each behaviors as b (b)}
             <option value={b}>{b}</option>
           {/each}
@@ -155,6 +162,34 @@
             {/if}
           </div>
         {/each}
+        {#if editing.behavior === "projectile"}
+          <div class="sprite-picker">
+            <span class="section-label">Projectile sprite</span>
+            <div class="tex-grid">
+              <button
+                class="tex-swatch none"
+                class:active={!editing.projectileSpriteRef}
+                onclick={() => editing && (editing.projectileSpriteRef = null)}
+                aria-label="none"
+              >
+                none
+              </button>
+              {#each mapStore.map.textures as t (t.id)}
+                <button
+                  class="tex-swatch"
+                  class:active={spriteRefId(editing.projectileSpriteRef) === t.id}
+                  onclick={() => editing && (editing.projectileSpriteRef = `texture:${t.id}`)}
+                  aria-label={t.name}
+                >
+                  <TextureThumb texture={t} size={28} />
+                </button>
+              {/each}
+            </div>
+            {#if mapStore.map.textures.length === 0}
+              <span class="hint">no textures yet — paint one in the Textures tab</span>
+            {/if}
+          </div>
+        {/if}
       </div>
     {:else}
       <p class="hint">Select or create a weapon to edit it.</p>

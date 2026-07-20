@@ -204,6 +204,7 @@ class MapStore {
       fireRateMs: 400,
       rangeCells: 5,
       projectileSpeed: null,
+      projectileSpriteRef: null,
       sfxId: null,
       sprites: { idle: null, fire: null },
     };

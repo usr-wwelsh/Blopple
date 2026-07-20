@@ -7,8 +7,7 @@ const MELEE_CONE_HALF_ANGLE = Math.PI / 6;
 const HITSCAN_HIT_RADIUS = 0.4;
 const PROJECTILE_HIT_RADIUS = 0.35;
 const PROJECTILE_VISUAL_SIZE = 0.15;
-// no dedicated projectile sprite field on WeaponDef yet — flat color keeps in-flight
-// shots visible without inventing a schema field this session doesn't need otherwise
+// fallback when a weapon has no projectileSpriteRef set, so in-flight shots stay visible
 const PROJECTILE_COLOR_REF = "color:#ffcc00";
 
 export interface Projectile {
@@ -19,6 +18,7 @@ export interface Projectile {
   speed: number;
   remainingRange: number;
   damage: number;
+  spriteRef: string | null;
 }
 
 function normalizeAngle(a: number): number {
@@ -101,6 +101,7 @@ export function fireWeapon(
         speed: weapon.projectileSpeed ?? 0,
         remainingRange: weapon.rangeCells,
         damage: weapon.damage,
+        spriteRef: weapon.projectileSpriteRef,
       });
       break;
     }
@@ -151,7 +152,7 @@ export function projectileBillboards(projectiles: Projectile[]): Billboard[] {
   return projectiles.map((p) => ({
     x: p.x,
     y: p.y,
-    textureRef: PROJECTILE_COLOR_REF,
+    textureRef: p.spriteRef ?? PROJECTILE_COLOR_REF,
     worldWidth: PROJECTILE_VISUAL_SIZE,
     worldHeight: PROJECTILE_VISUAL_SIZE,
   }));

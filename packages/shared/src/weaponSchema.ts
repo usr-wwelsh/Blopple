@@ -20,6 +20,9 @@ export interface WeaponDef {
   rangeCells: number;
   /** cells per second, only meaningful when behavior === "projectile" */
   projectileSpeed: number | null;
+  /** texture ref for the in-flight projectile billboard, same format as Cell.wallTextureId.
+   * Only meaningful when behavior === "projectile"; null falls back to a flat placeholder color. */
+  projectileSpriteRef: string | null;
   sfxId: string | null;
   sprites: WeaponSpriteFrames;
 }
