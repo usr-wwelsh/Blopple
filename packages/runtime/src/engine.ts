@@ -98,6 +98,21 @@ export interface Camera {
   fov: number;
 }
 
+/** A billboard sprite anchored to a floor cell — always faces the camera, Doom-style.
+ * Deliberately generic (no enemyId/behavior here): the engine renders billboards, it
+ * doesn't know what an "enemy" is. Callers resolve their own domain objects into these. */
+export interface Billboard {
+  x: number;
+  y: number;
+  /** ref format matches wallTextureId etc: "texture:<id>" | "color:#rrggbb" | null.
+   * A "color:" ref draws a solid rectangle (no cutout shape); only a texture ref gets
+   * per-pixel transparency from its null pixels. */
+  textureRef: string | null;
+  /** world units, stands on the floor of its cell — see floorHeightAt in renderBillboards */
+  worldWidth: number;
+  worldHeight: number;
+}
+
 interface StepHit {
   dist: number;
   height: HeightLevel;
@@ -211,6 +226,20 @@ function getFrameBuffer(width: number, height: number): { imageData: ImageData; 
     frameBuffer = { width, height, imageData, buf32 };
   }
   return frameBuffer;
+}
+
+// Per-column "nearest opaque distance" (wall or riser, whichever is closer), populated
+// during the main column loop in renderFrame and consumed by renderBillboards to occlude
+// sprites behind solid geometry. Same single-scalar-per-column zbuffer approach every
+// classic grid raycaster uses for sprites — it can't account for a farther riser sitting
+// in a screen gap above/below a nearer one in the same column, but that's the same class
+// of simplification this engine already accepts for single-hit-per-column walls (see
+// README's known limitations).
+let depthBuffer: Float32Array | null = null;
+
+function getDepthBuffer(width: number): Float32Array {
+  if (!depthBuffer || depthBuffer.length !== width) depthBuffer = new Float32Array(width);
+  return depthBuffer;
 }
 
 // Packs r/g/b (each assumed already an int in [0, 255]) plus opaque alpha into one
@@ -761,6 +790,134 @@ function cellHasFloorDecal(
   return false;
 }
 
+// Sprites are never behind the camera plane at exactly zero depth, but near-zero depth
+// blows up spriteScreenX (division by transformY) into nonsense off-screen coordinates —
+// clip anything closer than this instead of letting it flicker through the projection.
+const SPRITE_NEAR_CLIP = 0.1;
+
+/** One column-stripe of a billboard: samples texture column texX across [yTop, yBottom],
+ * skipping transparent (null) texels one row at a time — unlike writeTexturedWallColumn's
+ * opaque fast path, a billboard's silhouette isn't a filled rectangle, so this can't
+ * precompute one packed pixel per row and blit blindly. Billboard counts are small (a
+ * handful of enemies on screen, not one call per screen column), so this doesn't need
+ * that path's row-precompute/pooling — a per-texel hexToRgb call is already cache-hit. */
+function writeBillboardColumn(
+  buf32: Uint32Array,
+  bufWidth: number,
+  screenHeight: number,
+  col: number,
+  texture: TextureDef,
+  texX: number,
+  yTop: number,
+  yBottom: number,
+  dist: number,
+): void {
+  const span = yBottom - yTop;
+  if (span <= 0) return;
+  const top = Math.max(0, Math.floor(yTop));
+  const bottom = Math.min(screenHeight, Math.ceil(yBottom));
+  if (bottom <= top) return;
+  const fog = Math.max(0, 1 - dist / MAX_RENDER_DIST);
+  const rowStep = TEXTURE_SIZE / span;
+  for (let y = top; y < bottom; y++) {
+    let row = ((y - yTop) * rowStep) | 0;
+    if (row < 0) row = 0;
+    else if (row >= TEXTURE_SIZE) row = TEXTURE_SIZE - 1;
+    const hex = texture.pixels[row * TEXTURE_SIZE + texX];
+    if (hex === null) continue;
+    const rgb = hexToRgb(hex);
+    buf32[y * bufWidth + col] = packRgb((rgb[0] * fog) | 0, (rgb[1] * fog) | 0, (rgb[2] * fog) | 0);
+  }
+}
+
+interface SpriteProjection {
+  billboard: Billboard;
+  dist: number;
+  screenX: number;
+}
+
+/** Sprite-casting pass, run once per frame after all column geometry is in buf32/depthBuffer
+ * (see renderFrame). Transforms each billboard into camera space with the standard
+ * inverse-camera-matrix formula (same convention as castColumn's rayDir construction, so
+ * the two projections agree pixel-for-pixel), sorts far-to-near, then draws each as a
+ * vertical strip per covered column, skipping columns depthBuffer already marked as
+ * blocked by nearer wall/riser geometry. Sprite-vs-sprite overlap is handled by the
+ * far-to-near draw order alone (nearer sprites simply overwrite farther ones) — no need to
+ * update depthBuffer per sprite since only static geometry needs to occlude billboards. */
+function renderBillboards(
+  buf32: Uint32Array,
+  bufWidth: number,
+  screenHeight: number,
+  map: MapData,
+  camera: Camera,
+  fwdX: number,
+  fwdY: number,
+  planeX: number,
+  planeY: number,
+  eyeY: number,
+  centerY: number,
+  depths: Float32Array,
+  billboards: Billboard[],
+): void {
+  if (billboards.length === 0) return;
+
+  const invDet = 1 / (planeX * fwdY - fwdX * planeY);
+  const projections: SpriteProjection[] = [];
+  for (const billboard of billboards) {
+    const dx = billboard.x - camera.x;
+    const dy = billboard.y - camera.y;
+    const transformX = invDet * (fwdY * dx - fwdX * dy);
+    const dist = invDet * (-planeY * dx + planeX * dy);
+    if (dist <= SPRITE_NEAR_CLIP) continue;
+    const screenX = (bufWidth / 2) * (1 + transformX / dist);
+    projections.push({ billboard, dist, screenX });
+  }
+  projections.sort((a, b) => b.dist - a.dist);
+
+  for (const proj of projections) {
+    const { billboard, dist, screenX } = proj;
+    const parsed = parseTextureRef(billboard.textureRef);
+    if (!parsed) continue;
+
+    const scale = screenHeight / dist;
+    const halfWidthPx = (scale * billboard.worldWidth) / 2;
+    if (halfWidthPx <= 0) continue;
+    const leftPx = screenX - halfWidthPx;
+    const drawStart = Math.max(0, Math.floor(leftPx));
+    const drawEnd = Math.min(bufWidth - 1, Math.floor(screenX + halfWidthPx));
+    if (drawEnd < drawStart) continue;
+
+    const cellFloorY = floorHeightAt(map, billboard.x, billboard.y) * HEIGHT_STEP;
+    const yTop = projectY(cellFloorY + billboard.worldHeight, eyeY, centerY, scale);
+    const yBottom = projectY(cellFloorY, eyeY, centerY, scale);
+
+    if (parsed.kind === "color") {
+      const rgb = hexToRgb(parsed.color);
+      const fog = Math.max(0, 1 - dist / MAX_RENDER_DIST);
+      const pixel = packRgb((rgb[0] * fog) | 0, (rgb[1] * fog) | 0, (rgb[2] * fog) | 0);
+      const top = Math.max(0, Math.round(yTop));
+      const bottom = Math.min(screenHeight, Math.round(yBottom));
+      if (bottom <= top) continue;
+      for (let col = drawStart; col <= drawEnd; col++) {
+        if (dist >= depths[col]) continue;
+        for (let y = top; y < bottom; y++) buf32[y * bufWidth + col] = pixel;
+      }
+      continue;
+    }
+
+    const texture = textureIndexFor(map).get(parsed.id);
+    if (!texture) continue;
+    const widthPx = halfWidthPx * 2;
+    for (let col = drawStart; col <= drawEnd; col++) {
+      if (dist >= depths[col]) continue;
+      let texX = Math.floor(((col - leftPx) / widthPx) * TEXTURE_SIZE);
+      if (texX < 0) texX = 0;
+      else if (texX >= TEXTURE_SIZE) texX = TEXTURE_SIZE - 1;
+      writeBillboardColumn(buf32, bufWidth, screenHeight, col, texture, texX, yTop, yBottom, dist);
+    }
+  }
+}
+
 /** Grid raycaster with stepped heightfields: walls are single-hit-per-column
  * (no overhangs/second stories, see README known limitations), but floor
  * height transitions between wall hits render as step risers. */
@@ -772,6 +929,7 @@ export function renderFrame(
   height: number,
   heldKeys: ReadonlySet<KeyColor> = new Set(),
   collectedWeaponIds: ReadonlySet<string> = new Set(),
+  billboards: Billboard[] = [],
 ): void {
   textureFrameStamp++;
   const centerY = height / 2;
@@ -786,6 +944,7 @@ export function renderFrame(
   const planeY = fwdX * planeLen;
 
   const { imageData, buf32 } = getFrameBuffer(width, height);
+  const depths = getDepthBuffer(width);
 
   for (let col = 0; col < width; col++) {
     const cameraX = (2 * col) / width - 1;
@@ -795,6 +954,9 @@ export function renderFrame(
 
     const corrected = Math.max(hitDist, 0.0001);
     const scale = height / corrected;
+    // nearest opaque distance for this column — starts at the wall, tightened below to
+    // whichever riser (if any) sits closer than it; feeds depthBuffer for sprite occlusion
+    let colOpaqueDist = corrected;
 
     const baseFloorHeight = steps[steps.length - 1].height;
     const sideMul = side === 1 ? 0.75 : 1;
@@ -856,7 +1018,9 @@ export function renderFrame(
       layer.kind = 1;
       layer.i = i;
       layer.iEnd = i;
+      colOpaqueDist = Math.min(colOpaqueDist, layer.dist);
     }
+    depths[col] = colOpaqueDist;
     // farthest-to-nearest so a nearer surface always wins the rows it shares with a farther one.
     // Insertion sort over the pooled range (layerCount is small — a handful of steps per
     // column) instead of Array.prototype.sort, which would need a plain-array copy of the
@@ -1021,6 +1185,8 @@ export function renderFrame(
       }
     }
   }
+
+  renderBillboards(buf32, width, height, map, camera, fwdX, fwdY, planeX, planeY, eyeY, centerY, depths, billboards);
 
   ctx.putImageData(imageData, 0, 0);
 }
