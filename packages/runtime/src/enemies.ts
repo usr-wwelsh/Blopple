@@ -5,8 +5,6 @@ import type { Projectile } from "./combat";
 
 const HIT_FLASH_MS = 150;
 const HIT_FLASH_COLOR = "#ff2020";
-// how far inside its attack range a "ranged" enemy lets the player get before backing off
-const RANGED_RETREAT_FRACTION = 0.5;
 
 /** Per-placement runtime state resolved from map.enemies + map.enemyDefs. */
 export interface EnemyInstance {
@@ -83,12 +81,13 @@ function tryMoveEnemy(map: MapData, x: number, y: number, dx: number, dy: number
 /** An enemy only reacts once the player is within detectionRangeCells AND in line of
  * sight (checked via the same raycastWallDistance helper combat.ts uses for hitscan) —
  * hide behind a wall and it stays idle even if you're close. Once aware, behavior
- * branches: "chase" closes distance and melee-attacks in range; "stationary" never
- * moves and fires a projectile (via combat.ts's updateProjectiles) at anything that
- * wanders into range (turret/sentry); "ranged" holds/melee-attacks from range and backs
- * off if the player closes inside RANGED_RETREAT_FRACTION of that range (kiting). No
- * pathfinding in any case: an enemy on the wrong side of a wall just stops advancing
- * (or retreating) until line of sight opens up. */
+ * branches: "chase" closes distance and melee-attacks (instant damage) in range;
+ * "stationary" never moves and fires a projectile (via combat.ts's updateProjectiles)
+ * at anything that wanders into range (turret/sentry); "ranged" fires the same kind of
+ * projectile from range and backs away for as long as the player stays within
+ * attackRangeCells (kiting), closing distance again once out of range. No pathfinding in
+ * any case: an enemy on the wrong side of a wall just stops advancing (or retreating)
+ * until line of sight opens up. */
 export function updateEnemyAI(
   enemies: EnemyInstance[],
   map: MapData,
@@ -114,7 +113,7 @@ export function updateEnemyAI(
 
     const inAttackRange = dist <= enemy.attackRangeCells;
     if (inAttackRange && enemy.attackCooldownMs <= 0) {
-      if (enemy.behavior === "stationary") {
+      if (enemy.behavior === "stationary" || enemy.behavior === "ranged") {
         projectiles.push({
           x: enemy.x,
           y: enemy.y,
@@ -137,7 +136,7 @@ export function updateEnemyAI(
     let moveDirX = dirX;
     let moveDirY = dirY;
     let step = 0;
-    if (enemy.behavior === "ranged" && dist < enemy.attackRangeCells * RANGED_RETREAT_FRACTION) {
+    if (enemy.behavior === "ranged" && inAttackRange) {
       moveDirX = -dirX;
       moveDirY = -dirY;
       step = enemy.speed * dt;

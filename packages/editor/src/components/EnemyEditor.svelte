@@ -67,7 +67,7 @@
           onchange={(e) => {
             if (!editing) return;
             editing.behavior = (e.target as HTMLSelectElement).value as EnemyBehavior;
-            if (editing.behavior === "stationary" && editing.projectileSpeed === null) editing.projectileSpeed = 5;
+            if (editing.behavior !== "chase" && editing.projectileSpeed === null) editing.projectileSpeed = 5;
           }}
         >
           {#each behaviors as b (b)}
@@ -95,7 +95,7 @@
         Detection range (cells)
         <input type="number" min="0" step="0.5" bind:value={editing.detectionRangeCells} />
       </label>
-      {#if editing.behavior === "stationary"}
+      {#if editing.behavior !== "chase"}
         <label class="row">
           Projectile speed (cells/sec)
           <input
@@ -143,7 +143,7 @@
         {/if}
       </div>
 
-      {#if editing.behavior === "stationary"}
+      {#if editing.behavior !== "chase"}
         <div class="sprite-picker">
           <span class="section-label">Projectile sprite</span>
           <div class="tex-grid">

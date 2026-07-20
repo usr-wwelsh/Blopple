@@ -1,8 +1,9 @@
 export const ENEMY_SCHEMA_VERSION = 1;
 
-/** chase: closes distance and melee-attacks once in range. stationary: never moves,
- * attacks anything that wanders into range (turret/sentry). ranged: holds/attacks from
- * range, backing off if the player gets too close (kiting). */
+/** chase: closes distance and melee-attacks (instant damage) once in range. stationary:
+ * never moves, fires a projectile at anything that wanders into range (turret/sentry).
+ * ranged: fires the same kind of projectile from range, backing off if the player gets
+ * too close (kiting). */
 export type EnemyBehavior = "chase" | "stationary" | "ranged";
 
 export interface EnemyDef {
@@ -19,11 +20,11 @@ export interface EnemyDef {
   attackRateMs: number;
   /** enemy ignores the player entirely beyond this distance (or without line of sight) */
   detectionRangeCells: number;
-  /** cells per second; only meaningful when behavior === "stationary", which attacks by
-   * firing a projectile instead of the instant hit chase/ranged land on contact */
+  /** cells per second; only meaningful when behavior is "stationary" or "ranged", which
+   * attack by firing a projectile instead of the instant hit "chase" lands on contact */
   projectileSpeed: number | null;
   /** texture ref for the in-flight projectile billboard, same format as Cell.wallTextureId.
-   * Only meaningful when behavior === "stationary". */
+   * Only meaningful when behavior is "stationary" or "ranged". */
   projectileSpriteRef: string | null;
   /** billboard size in world units (cells) */
   width: number;
