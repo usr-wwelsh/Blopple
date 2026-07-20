@@ -22,6 +22,8 @@
   const riserGeometries = new Map<number, THREE.BoxGeometry>();
   const materialCache = new Map<string, THREE.MeshStandardMaterial>();
   const canvasTextureCache = new Map<string, THREE.CanvasTexture>();
+  const spriteMaterialCache = new Map<string, THREE.SpriteMaterial>();
+  const spriteTextureCache = new Map<string, THREE.CanvasTexture>();
 
   // solid pillar filling the gap under a raised floor tile, so stepped cells
   // read as ground rising up rather than a floor slab floating in mid-air
@@ -53,6 +55,45 @@
     ct.colorSpace = THREE.SRGBColorSpace;
     canvasTextureCache.set(tex.id, ct);
     return ct;
+  }
+
+  // unlike canvasTextureFor, leaves null pixels transparent instead of opaque black —
+  // billboards need cutout alpha the way the raycaster's billboard renderer does
+  function spriteCanvasTextureFor(tex: TextureDef): THREE.CanvasTexture {
+    let ct = spriteTextureCache.get(tex.id);
+    if (ct) return ct;
+    const c = document.createElement("canvas");
+    c.width = TEXTURE_SIZE;
+    c.height = TEXTURE_SIZE;
+    const cctx = c.getContext("2d")!;
+    for (let y = 0; y < TEXTURE_SIZE; y++) {
+      for (let x = 0; x < TEXTURE_SIZE; x++) {
+        const color = tex.pixels[y * TEXTURE_SIZE + x];
+        if (color === null) continue;
+        cctx.fillStyle = color;
+        cctx.fillRect(x, y, 1, 1);
+      }
+    }
+    ct = new THREE.CanvasTexture(c);
+    ct.magFilter = THREE.NearestFilter;
+    ct.minFilter = THREE.NearestFilter;
+    ct.colorSpace = THREE.SRGBColorSpace;
+    spriteTextureCache.set(tex.id, ct);
+    return ct;
+  }
+
+  function spriteMaterialFor(ref: string | null): THREE.SpriteMaterial {
+    const key = ref ?? "";
+    let mat = spriteMaterialCache.get(key);
+    if (mat) return mat;
+
+    const parsed = parseTextureRef(ref);
+    const tex = parsed?.kind === "texture" ? mapStore.textureAt(parsed.id) : undefined;
+    mat = tex
+      ? new THREE.SpriteMaterial({ map: spriteCanvasTextureFor(tex), transparent: true })
+      : new THREE.SpriteMaterial({ color: textureIdToColor(ref) });
+    spriteMaterialCache.set(key, mat);
+    return mat;
   }
 
   // grouping by ref caps draw calls to ~palette/texture-set size regardless of map dimensions
@@ -144,6 +185,17 @@
     exitMesh.position.set(exit.x, (exitCell?.height ?? 0) * STEP_HEIGHT + 0.5, exit.y);
     group.add(exitMesh);
 
+    for (const placement of mapStore.map.enemies) {
+      const def = mapStore.enemyAt(placement.enemyId);
+      if (!def) continue;
+      const cell = mapStore.cellAt(Math.floor(placement.x), Math.floor(placement.y));
+      const floorY = (cell?.height ?? 0) * STEP_HEIGHT;
+      const sprite = new THREE.Sprite(spriteMaterialFor(def.spriteRef));
+      sprite.scale.set(def.width, def.height, 1);
+      sprite.position.set(placement.x, floorY + def.height / 2, placement.y);
+      group.add(sprite);
+    }
+
     return group;
   }
 
@@ -204,6 +256,8 @@
       riserGeometries.forEach((g) => g.dispose());
       materialCache.forEach((m) => m.dispose());
       canvasTextureCache.forEach((t) => t.dispose());
+      spriteMaterialCache.forEach((m) => m.dispose());
+      spriteTextureCache.forEach((t) => t.dispose());
       controls.dispose();
       renderer.dispose();
     };
