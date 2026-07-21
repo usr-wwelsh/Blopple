@@ -142,8 +142,33 @@ function renderOverlay(ctx: CanvasRenderingContext2D, message: string, width: nu
   ctx.fillText(message, width / 2, height / 2);
 }
 
-/** Full-screen overlay shown once currentHealth hits 0 — freezes on top of whatever
- * frame was last rendered (movement is already frozen in updatePlayer via isDead). */
-export function renderDeathOverlay(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+const HINT_COLOR = "#999999";
+const HINT_TEXT = "PRESS ANY KEY TO RESPAWN";
+const HINT_DIM_ALPHA = 0.35;
+const HINT_BLINK_MS = 1000;
+const HINT_BLINK_ON_MS = 650;
+
+/** How long input is locked out after death before "any key" actually respawns —
+ * shared with the keydown/mousedown handlers in main.ts / PlayTest.svelte so the hint's
+ * fade-in and the real unlock happen at the same instant. */
+export const RESPAWN_LOCK_MS = 3000;
+
+/** Full-screen overlay shown once currentHealth hits 0 — freezes on top of whatever frame
+ * was last rendered (movement is already frozen in updatePlayer via isDead). The respawn
+ * hint stays dim and static during RESPAWN_LOCK_MS, then lights up and blinks once the
+ * caller's "any key" handler will actually respond to input. */
+export function renderDeathOverlay(ctx: CanvasRenderingContext2D, width: number, height: number, elapsedMs: number): void {
   renderOverlay(ctx, "YOU DIED", width, height);
+
+  const locked = elapsedMs < RESPAWN_LOCK_MS;
+  if (!locked && elapsedMs % HINT_BLINK_MS >= HINT_BLINK_ON_MS) return;
+
+  ctx.save();
+  ctx.globalAlpha = locked ? HINT_DIM_ALPHA : 1;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = HINT_COLOR;
+  ctx.font = `${Math.round(height * 0.035)}px monospace`;
+  ctx.fillText(HINT_TEXT, width / 2, height / 2 + height * 0.12);
+  ctx.restore();
 }

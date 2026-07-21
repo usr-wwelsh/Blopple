@@ -1,6 +1,6 @@
 import type { MapData } from "@blopple/shared";
 import { renderFrame, type Camera } from "./engine";
-import { renderHud, renderViewmodel, renderDeathOverlay } from "./hud";
+import { renderHud, renderViewmodel, renderDeathOverlay, RESPAWN_LOCK_MS } from "./hud";
 import { renderIntroOutroScreen } from "./introOutro";
 import { InputController } from "./input";
 import { createPlayerState, updatePlayer } from "./player";
@@ -29,8 +29,9 @@ input.start();
 const camera: Camera = { x: player.x, y: player.y, angle: player.angle, fov: Math.PI / 3 };
 
 // title screen (waiting for input) -> gameplay -> level-complete screen, in that order —
-// see IntroOutroConfig for what each of the two non-gameplay screens can show
-type Phase = "intro" | "playing" | "outro";
+// see IntroOutroConfig for what each of the two non-gameplay screens can show.
+// "dead" is a side branch off "playing", reachable on death and looping back to "playing".
+type Phase = "intro" | "playing" | "outro" | "dead";
 let phase: Phase = "intro";
 let phaseStartMs = performance.now();
 
@@ -39,8 +40,24 @@ function beginPlaying(): void {
   phase = "playing";
   phaseStartMs = performance.now();
 }
-window.addEventListener("keydown", beginPlaying);
-canvas.addEventListener("mousedown", beginPlaying);
+
+function respawn(): void {
+  if (phase !== "dead" || performance.now() - phaseStartMs < RESPAWN_LOCK_MS) return;
+  Object.assign(player, createPlayerState(BLOPPLE_MAP));
+  enemies.length = 0;
+  enemies.push(...createEnemyInstances(BLOPPLE_MAP));
+  projectiles.length = 0;
+  phase = "playing";
+  phaseStartMs = performance.now();
+}
+window.addEventListener("keydown", () => {
+  beginPlaying();
+  respawn();
+});
+canvas.addEventListener("mousedown", () => {
+  beginPlaying();
+  respawn();
+});
 
 let last = performance.now();
 function loop(now: number): void {
@@ -57,6 +74,17 @@ function loop(now: number): void {
   if (phase === "outro") {
     playMusic(BLOPPLE_MAP, BLOPPLE_MAP.outro.musicId);
     renderIntroOutroScreen(ctx, BLOPPLE_MAP, BLOPPLE_MAP.outro, now - phaseStartMs, canvas.width, canvas.height, null);
+    requestAnimationFrame(loop);
+    return;
+  }
+
+  if (phase === "dead") {
+    const billboards = enemyBillboards(enemies);
+    for (const b of projectileBillboards(projectiles)) billboards.push(b);
+    renderFrame(ctx, BLOPPLE_MAP, camera, canvas.width, canvas.height, player.keys, new Set(player.heldWeaponIds), billboards);
+    renderViewmodel(ctx, BLOPPLE_MAP, player, canvas.width, canvas.height);
+    renderHud(ctx, player, canvas.width, canvas.height);
+    renderDeathOverlay(ctx, canvas.width, canvas.height, now - phaseStartMs);
     requestAnimationFrame(loop);
     return;
   }
@@ -81,9 +109,11 @@ function loop(now: number): void {
   renderFrame(ctx, BLOPPLE_MAP, camera, canvas.width, canvas.height, player.keys, new Set(player.heldWeaponIds), billboards);
   renderViewmodel(ctx, BLOPPLE_MAP, player, canvas.width, canvas.height);
   renderHud(ctx, player, canvas.width, canvas.height);
-  if (player.isDead) renderDeathOverlay(ctx, canvas.width, canvas.height);
 
-  if (player.hasReachedExit) {
+  if (player.isDead) {
+    phase = "dead";
+    phaseStartMs = now;
+  } else if (player.hasReachedExit) {
     phase = "outro";
     phaseStartMs = now;
   }
