@@ -1,5 +1,22 @@
-import type { Cell, HeightLevel, KeyColor, KeyPickup, MapData, TextureDef, WeaponPickup } from "@blopple/shared";
+import type { Cell, HeightLevel, KeyColor, KeyPickup, MapData, TextureDef, TextureRef, WeaponPickup } from "@blopple/shared";
 import { EXIT_COLOR_HEX, KEY_COLOR_HEX, TEXTURE_SIZE, parseTextureRef } from "@blopple/shared";
+
+// parseTextureRef is just string-prefix parsing, but it's called on every column for every
+// wall/floor/ceiling/riser layer, every frame, for a ref string drawn from a small, stable
+// set (the map's texture/color ids) — memoized once per distinct ref instead of re-parsed
+// each call. Never invalidated: ref strings are immutable map data: once "color:#rrggbb" or
+// "texture:<id>" always the same, never rewritten in place.
+const textureRefCache = new Map<string, TextureRef | null>();
+
+function cachedParseTextureRef(ref: string | null): TextureRef | null {
+  if (ref === null) return null;
+  let parsed = textureRefCache.get(ref);
+  if (parsed === undefined) {
+    parsed = parseTextureRef(ref);
+    textureRefCache.set(ref, parsed);
+  }
+  return parsed;
+}
 
 export const HEIGHT_STEP = 0.5;
 export const CEILING_Y = 1.6;
@@ -602,6 +619,34 @@ function planeDistAt(worldY: number, y: number, eyeY: number, centerY: number, s
   return Math.min(MAX_RENDER_DIST, Math.max(0.0001, Math.abs(d)));
 }
 
+// planeDistAt(worldY, y, ...) depends only on the screen row y, not on column/rayDir — every
+// column sampling the same worldY (a given floor height or the one ceiling height) at the same
+// row recomputes the identical division. renderPlaneSegment used to pay that per band, per
+// column, every frame (up to MAX_PLANE_BANDS times width times per frame), which is where most
+// of a frame's time was going. Precomputed once per (frame, worldY) into a row-indexed table
+// instead — eyeY/centerY/screenHeight are fixed for the whole frame, so each table entry is
+// exact at that integer row; the band loop below looks up the *nearest* row to its (fractional)
+// midY, so it's a sub-pixel approximation of the old per-band call, not a bit-for-bit match.
+// Keyed on textureFrameStamp (bumped once per renderFrame call, same as getTextureRgb's cache)
+// so a moving camera's new eyeY rebuilds it next frame.
+const rowDistTables = new Map<number, Float64Array>();
+let rowDistTablesStamp = -1;
+
+function rowDistTableFor(worldY: number, eyeY: number, centerY: number, screenHeight: number): Float64Array {
+  if (rowDistTablesStamp !== textureFrameStamp) {
+    rowDistTables.clear();
+    rowDistTablesStamp = textureFrameStamp;
+  }
+  let table = rowDistTables.get(worldY);
+  if (!table) {
+    const rows = Math.ceil(screenHeight) + 1;
+    table = new Float64Array(rows);
+    for (let y = 0; y < rows; y++) table[y] = planeDistAt(worldY, y, eyeY, centerY, screenHeight);
+    rowDistTables.set(worldY, table);
+  }
+  return table;
+}
+
 /** Floor/ceiling texturing for one grid-cell segment of one column: buckets the segment's
  * screen span into rows and, for each row, recovers the world point under it to sample the
  * 2D tile at (x mod 1, y mod 1). Band count scales with the segment's on-screen height (up to
@@ -637,7 +682,7 @@ function renderPlaneSegment(
   clipTop: number,
   clipBottom: number,
 ): void {
-  const parsed = parseTextureRef(ref);
+  const parsed = cachedParseTextureRef(ref);
   const texture = parsed?.kind === "texture" ? textureIndexFor(map).get(parsed.id) : undefined;
 
   // band count tracks the segment's actual pixel span (capped at MAX_PLANE_BANDS) instead of
@@ -657,11 +702,16 @@ function renderPlaneSegment(
   // is the only per-band cost a flat color can skip.
   const rgbBuf = texture ? getTextureRgb(texture) : null;
   const flatRgb = rgbBuf ? null : hexToRgb(refColor(ref, fallback));
+  const rowTable = rowDistTableFor(worldY, eyeY, centerY, screenHeight);
+  const maxRow = rowTable.length - 1;
   for (let band = 0; band < bands; band++) {
     const rowTop = top + (band / bands) * span;
     const rowBottom = top + ((band + 1) / bands) * span;
     const midY = (rowTop + rowBottom) / 2;
-    const dist = planeDistAt(worldY, midY, eyeY, centerY, screenHeight);
+    let rowIdx = Math.round(midY);
+    if (rowIdx < 0) rowIdx = 0;
+    else if (rowIdx > maxRow) rowIdx = maxRow;
+    const dist = rowTable[rowIdx];
     const fog = Math.max(0, 1 - dist / MAX_RENDER_DIST);
     if (rgbBuf) {
       const fx = camera.x + dist * rayDirX;
@@ -959,7 +1009,7 @@ function renderBillboards(
 
   for (const proj of projections) {
     const { billboard, dist, screenX } = proj;
-    const parsed = parseTextureRef(billboard.textureRef);
+    const parsed = cachedParseTextureRef(billboard.textureRef);
     if (!parsed) continue;
 
     const scale = screenHeight / dist;
@@ -1219,7 +1269,7 @@ export function renderFrame(
         if (riserBottom > riserTop) {
           computeGaps(riserTop, riserBottom);
           const riserFloorRef = steps[i].cell?.floorTextureId ?? null;
-          const riserParsed = parseTextureRef(riserFloorRef);
+          const riserParsed = cachedParseTextureRef(riserFloorRef);
           const riserTexture = riserParsed?.kind === "texture" ? textureIndexFor(map).get(riserParsed.id) : undefined;
           if (riserTexture) {
             const riserSide = steps[i].side;
@@ -1251,7 +1301,7 @@ export function renderFrame(
         wallCell?.doorColor && !wallCell.doorOpen
           ? `color:${KEY_COLOR_HEX[wallCell.doorColor]}`
           : (wallCell?.wallTextureId ?? null);
-      const parsed = parseTextureRef(wallRef);
+      const parsed = cachedParseTextureRef(wallRef);
       const texture = parsed?.kind === "texture" ? textureIndexFor(map).get(parsed.id) : undefined;
 
       if (texture) {
