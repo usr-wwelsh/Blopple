@@ -4,8 +4,8 @@
     renderFrame,
     renderHud,
     renderViewmodel,
-    renderExitOverlay,
     renderDeathOverlay,
+    renderIntroOutroScreen,
     InputController,
     createPlayerState,
     updatePlayer,
@@ -50,6 +50,21 @@
     };
     document.addEventListener("pointerlockchange", onLockChange);
 
+    // title screen (waiting for input) -> gameplay -> level-complete screen — mirrors
+    // packages/runtime/src/main.ts's phase machine (this loop is a hand-rolled copy of
+    // that one, not an import of it, so both need updating together)
+    type Phase = "intro" | "playing" | "outro";
+    let phase: Phase = "intro";
+    let phaseStartMs = performance.now();
+
+    const beginPlaying = (): void => {
+      if (phase !== "intro") return;
+      phase = "playing";
+      phaseStartMs = performance.now();
+    };
+    window.addEventListener("keydown", beginPlaying);
+    canvas.addEventListener("mousedown", beginPlaying);
+
     let frameId: number;
     let last = performance.now();
     // exponential moving averages, not a rolling window — no per-frame array/allocation,
@@ -61,6 +76,19 @@
       const rawFrameMs = now - last;
       const dt = Math.min(rawFrameMs / 1000, 0.1);
       last = now;
+
+      if (phase === "intro") {
+        playMusic(map, map.intro.musicId);
+        renderIntroOutroScreen(ctx, map, map.intro, now - phaseStartMs, canvas.width, canvas.height, "PRESS ANY KEY TO START");
+        frameId = requestAnimationFrame(loop);
+        return;
+      }
+      if (phase === "outro") {
+        playMusic(map, map.outro.musicId);
+        renderIntroOutroScreen(ctx, map, map.outro, now - phaseStartMs, canvas.width, canvas.height, null);
+        frameId = requestAnimationFrame(loop);
+        return;
+      }
 
       updatePlayer(player, map, map.player, input.poll(), dt);
       camera.x = player.x;
@@ -75,7 +103,7 @@
       updateProjectiles(map, projectiles, enemies, player, dt);
       updateEnemyAI(enemies, map, player, projectiles, dt);
       updateEnemies(enemies, dt);
-      playMusic(map, player.hasReachedExit ? map.music.outroSongId : map.music.gameplaySongId);
+      playMusic(map, map.music.gameplaySongId);
 
       const billboards = [...enemyBillboards(enemies), ...projectileBillboards(projectiles)];
       const renderStart = performance.now();
@@ -83,8 +111,12 @@
       const renderMs = performance.now() - renderStart;
       renderViewmodel(ctx, map, player, canvas.width, canvas.height);
       renderHud(ctx, player, canvas.width, canvas.height);
-      if (player.hasReachedExit) renderExitOverlay(ctx, map, canvas.width, canvas.height);
-      else if (player.isDead) renderDeathOverlay(ctx, canvas.width, canvas.height);
+      if (player.isDead) renderDeathOverlay(ctx, canvas.width, canvas.height);
+
+      if (player.hasReachedExit) {
+        phase = "outro";
+        phaseStartMs = now;
+      }
 
       if (debugOverlay) {
         frameMsEma = frameMsEma === 0 ? rawFrameMs : frameMsEma + (rawFrameMs - frameMsEma) * EMA_ALPHA;
@@ -99,6 +131,8 @@
     return () => {
       cancelAnimationFrame(frameId);
       document.removeEventListener("pointerlockchange", onLockChange);
+      window.removeEventListener("keydown", beginPlaying);
+      canvas.removeEventListener("mousedown", beginPlaying);
       input.stop();
       playMusic(map, null);
     };

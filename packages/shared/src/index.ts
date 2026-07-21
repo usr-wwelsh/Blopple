@@ -1,4 +1,5 @@
 export * from "./mapSchema";
+export * from "./introSchema";
 export * from "./enemySchema";
 export * from "./musicSchema";
 export * from "./textureSchema";

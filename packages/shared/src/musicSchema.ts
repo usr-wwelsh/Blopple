@@ -87,8 +87,8 @@ export interface AudioTrackDef {
 
 export type MusicRef = { kind: "song"; id: string } | { kind: "track"; id: string };
 
-/** gameplaySongId/outroSongId hold refs in "song:<id>" | "track:<id>" form, pointing at
- * either a tracker Song or an imported AudioTrackDef. */
+/** gameplaySongId (and IntroOutroConfig.musicId) hold refs in "song:<id>" | "track:<id>"
+ * form, pointing at either a tracker Song or an imported AudioTrackDef. */
 export function parseMusicRef(ref: string | null): MusicRef | null {
   if (!ref) return null;
   if (ref.startsWith("song:")) return { kind: "song", id: ref.slice(5) };
@@ -99,6 +99,4 @@ export function parseMusicRef(ref: string | null): MusicRef | null {
 export interface MapMusicSettings {
   /** Ref (see parseMusicRef) looped for the duration of gameplay, from level start until the exit is reached. */
   gameplaySongId: string | null;
-  /** Ref (see parseMusicRef) looped once the player reaches the exit, in place of the gameplay song. */
-  outroSongId: string | null;
 }

@@ -3,6 +3,7 @@ import type { Song, SfxDef, MapMusicSettings, AudioTrackDef } from "./musicSchem
 import type { WeaponDef, WeaponPickup } from "./weaponSchema";
 import type { EnemyDef } from "./enemySchema";
 import type { PlayerDef } from "./playerSchema";
+import type { IntroOutroConfig } from "./introSchema";
 
 export const SCHEMA_VERSION = 1;
 
@@ -62,11 +63,13 @@ export interface MapData {
   songs: Song[];
   audioTracks: AudioTrackDef[];
   music: MapMusicSettings;
+  intro: IntroOutroConfig;
+  outro: IntroOutroConfig;
   sfx: SfxDef[];
   weapons: WeaponDef[];
   weaponPickups: WeaponPickup[];
   keyPickups: KeyPickup[];
   player: PlayerDef;
   playerStart: { x: number; y: number; facing: number };
-  exit: { x: number; y: number; message: string };
+  exit: { x: number; y: number };
 }

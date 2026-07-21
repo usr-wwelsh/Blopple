@@ -1,6 +1,7 @@
 export { renderFrame, isSolid, cellAt, floorHeightAt, raycastWallDistance, HEIGHT_STEP, CEILING_Y, EYE_OFFSET } from "./engine";
 export type { Camera, Billboard } from "./engine";
-export { renderHud, renderViewmodel, renderExitOverlay, renderDeathOverlay } from "./hud";
+export { renderHud, renderViewmodel, renderDeathOverlay } from "./hud";
+export { renderIntroOutroScreen } from "./introOutro";
 export { InputController } from "./input";
 export type { InputState } from "./input";
 export { createPlayerState, updatePlayer, damagePlayer } from "./player";

@@ -11,11 +11,6 @@
     const value = (e.target as HTMLSelectElement).value;
     mapStore.setGameplayMusic(value || null);
   }
-
-  function onOutroSongChange(e: Event): void {
-    const value = (e.target as HTMLSelectElement).value;
-    mapStore.setOutroMusic(value || null);
-  }
 </script>
 
 <div class="music-editor">
@@ -40,26 +35,7 @@
         {/if}
       </select>
     </label>
-    <label>
-      Outro Music
-      <select value={mapStore.map.music.outroSongId ?? ""} onchange={onOutroSongChange}>
-        <option value="">None</option>
-        {#if mapStore.map.songs.length > 0}
-          <optgroup label="Songs">
-            {#each mapStore.map.songs as s (s.id)}
-              <option value={`song:${s.id}`}>{s.name}</option>
-            {/each}
-          </optgroup>
-        {/if}
-        {#if mapStore.map.audioTracks.length > 0}
-          <optgroup label="Imported audio">
-            {#each mapStore.map.audioTracks as t (t.id)}
-              <option value={`track:${t.id}`}>{t.name}</option>
-            {/each}
-          </optgroup>
-        {/if}
-      </select>
-    </label>
+    <span class="hint">Intro/outro music is set in the Intro/Outro tab.</span>
   </div>
 
   <div class="sub-tabs">
@@ -103,6 +79,11 @@
     border: 1px solid #444;
     padding: 0.3rem;
     font: inherit;
+  }
+  .level-music .hint {
+    color: #888;
+    font-size: 0.85em;
+    align-self: center;
   }
   .sub-tabs {
     display: flex;

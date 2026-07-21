@@ -1,4 +1,4 @@
-import type { Cell, KeyColor, MapData, TextureDef, Song, AudioTrackDef, Instrument, Pattern, SfxDef, SfxLayer, WeaponDef, EnemyDef } from "@blopple/shared";
+import type { Cell, KeyColor, MapData, TextureDef, Song, AudioTrackDef, Instrument, Pattern, SfxDef, SfxLayer, WeaponDef, EnemyDef, IntroOutroConfig, BackgroundMode } from "@blopple/shared";
 import {
   TEXTURE_SCHEMA_VERSION,
   TEXTURE_SIZE,
@@ -7,6 +7,7 @@ import {
   PLAYER_SCHEMA_VERSION,
   WEAPON_SCHEMA_VERSION,
   ENEMY_SCHEMA_VERSION,
+  emptyIntroOutroConfig,
 } from "@blopple/shared";
 import { INSTRUMENT_PRESETS } from "./musicPresets";
 
@@ -73,14 +74,16 @@ function emptyMap(width: number, height: number): MapData {
     textures: [],
     songs: [],
     audioTracks: [],
-    music: { gameplaySongId: null, outroSongId: null },
+    music: { gameplaySongId: null },
+    intro: emptyIntroOutroConfig(),
+    outro: emptyIntroOutroConfig(["Level Complete"]),
     sfx: [],
     weapons: [],
     weaponPickups: [],
     keyPickups: [],
     player: { schemaVersion: PLAYER_SCHEMA_VERSION, health: 100, speed: 3, startingWeaponId: null },
     playerStart: { x: Math.floor(width / 2) + 0.5, y: Math.floor(height / 2) + 0.5, facing: 0 },
-    exit: { x: 1.5, y: 1.5, message: "Level Complete" },
+    exit: { x: 1.5, y: 1.5 },
   };
 }
 
@@ -113,14 +116,11 @@ class MapStore {
     if (!data.textures) data.textures = [];
     if (!data.songs) data.songs = [];
     if (!data.audioTracks) data.audioTracks = [];
-    if (!data.music) data.music = { gameplaySongId: null, outroSongId: null };
-    // pre-dates imported audio tracks — gameplaySongId/outroSongId were bare Song ids;
-    // tag them so they parse as MusicRef alongside the new "track:<id>" form
+    if (!data.music) data.music = { gameplaySongId: null };
+    // pre-dates imported audio tracks — gameplaySongId was a bare Song id; tag it so it
+    // parses as MusicRef alongside the new "track:<id>" form
     if (data.music.gameplaySongId && !data.music.gameplaySongId.includes(":")) {
       data.music.gameplaySongId = `song:${data.music.gameplaySongId}`;
-    }
-    if (data.music.outroSongId && !data.music.outroSongId.includes(":")) {
-      data.music.outroSongId = `song:${data.music.outroSongId}`;
     }
     if (!data.sfx) data.sfx = [];
     if (!data.weapons) data.weapons = [];
@@ -132,8 +132,23 @@ class MapStore {
       data.player = { schemaVersion: PLAYER_SCHEMA_VERSION, health: 100, speed: 3, startingWeaponId: null };
     }
     if (!data.exit) {
-      data.exit = { x: 1.5, y: 1.5, message: "Level Complete" };
+      data.exit = { x: 1.5, y: 1.5 };
     }
+    // pre-dates the intro/outro screens — synthesize outro from the old flat
+    // music.outroSongId + exit.message fields, then drop both
+    if (!data.intro) data.intro = emptyIntroOutroConfig();
+    if (!data.outro) {
+      const legacy = data as unknown as { music: { outroSongId?: string | null }; exit: { message?: string } };
+      let outroMusicId = legacy.music.outroSongId ?? null;
+      if (outroMusicId && !outroMusicId.includes(":")) outroMusicId = `song:${outroMusicId}`;
+      data.outro = emptyIntroOutroConfig([legacy.exit.message ?? "Level Complete"]);
+      data.outro.musicId = outroMusicId;
+    }
+    delete (data.music as { outroSongId?: string | null }).outroSongId;
+    delete (data.exit as { message?: string }).message;
+    // pre-dates crawl text color (was hardcoded in the renderer)
+    if (!data.intro.textColor) data.intro.textColor = "#e8e8e8";
+    if (!data.outro.textColor) data.outro.textColor = "#e8e8e8";
     // pre-dates layered sfx (was a single instrument+note pair) — wrap it as a one-layer stack
     for (const sfx of data.sfx as (SfxDef & { instrument?: Instrument; note?: number })[]) {
       if (!sfx.layers) {
@@ -314,6 +329,8 @@ class MapStore {
       if (cell.floorTextureId === ref) cell.floorTextureId = null;
       if (cell.ceilingTextureId === ref) cell.ceilingTextureId = null;
     }
+    if (this.map.intro.backgroundId === ref) this.map.intro.backgroundId = null;
+    if (this.map.outro.backgroundId === ref) this.map.outro.backgroundId = null;
   }
 
   renameTexture(id: string, name: string): void {
@@ -357,15 +374,12 @@ class MapStore {
     this.map.songs.splice(idx, 1);
     const ref = `song:${id}`;
     if (this.map.music.gameplaySongId === ref) this.map.music.gameplaySongId = null;
-    if (this.map.music.outroSongId === ref) this.map.music.outroSongId = null;
+    if (this.map.intro.musicId === ref) this.map.intro.musicId = null;
+    if (this.map.outro.musicId === ref) this.map.outro.musicId = null;
   }
 
   setGameplayMusic(ref: string | null): void {
     this.map.music.gameplaySongId = ref;
-  }
-
-  setOutroMusic(ref: string | null): void {
-    this.map.music.outroSongId = ref;
   }
 
   // --- music: imported audio tracks ---
@@ -391,7 +405,34 @@ class MapStore {
     this.map.audioTracks.splice(idx, 1);
     const ref = `track:${id}`;
     if (this.map.music.gameplaySongId === ref) this.map.music.gameplaySongId = null;
-    if (this.map.music.outroSongId === ref) this.map.music.outroSongId = null;
+    if (this.map.intro.musicId === ref) this.map.intro.musicId = null;
+    if (this.map.outro.musicId === ref) this.map.outro.musicId = null;
+  }
+
+  // --- intro / outro screens ---
+
+  introOutroAt(screen: "intro" | "outro"): IntroOutroConfig {
+    return this.map[screen];
+  }
+
+  setIntroOutroMusic(screen: "intro" | "outro", ref: string | null): void {
+    this.map[screen].musicId = ref;
+  }
+
+  setIntroOutroText(screen: "intro" | "outro", text: string[]): void {
+    this.map[screen].text = text;
+  }
+
+  setIntroOutroTextColor(screen: "intro" | "outro", color: string): void {
+    this.map[screen].textColor = color;
+  }
+
+  setIntroOutroBackground(screen: "intro" | "outro", ref: string | null): void {
+    this.map[screen].backgroundId = ref;
+  }
+
+  setIntroOutroBackgroundMode(screen: "intro" | "outro", mode: BackgroundMode): void {
+    this.map[screen].backgroundMode = mode;
   }
 
   renameAudioTrack(id: string, name: string): void {

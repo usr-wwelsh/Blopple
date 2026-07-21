@@ -1,6 +1,7 @@
-import type { MapData, TextureDef } from "@blopple/shared";
-import { KEY_COLORS, KEY_COLOR_HEX, TEXTURE_SIZE, parseTextureRef } from "@blopple/shared";
+import type { MapData } from "@blopple/shared";
+import { KEY_COLORS, KEY_COLOR_HEX, parseTextureRef } from "@blopple/shared";
 import type { PlayerState } from "./player";
+import { textureCanvasFor } from "./textureCanvas";
 
 const BAR_HEIGHT_RATIO = 0.14;
 const WEAPON_SLOT_COUNT = 4;
@@ -99,29 +100,6 @@ export function renderHud(
 const VIEWMODEL_SIZE_RATIO = 0.4;
 const VIEWMODEL_BOTTOM_MARGIN_RATIO = 0.02;
 
-// rebuilt lazily per texture and reused across frames — same pattern as MapGrid.svelte's
-// textureCanvasCache in the editor, just scoped to the runtime instead
-const viewmodelCanvasCache = new WeakMap<TextureDef, HTMLCanvasElement>();
-
-function viewmodelCanvasFor(tex: TextureDef): HTMLCanvasElement {
-  let canvas = viewmodelCanvasCache.get(tex);
-  if (canvas) return canvas;
-  canvas = document.createElement("canvas");
-  canvas.width = TEXTURE_SIZE;
-  canvas.height = TEXTURE_SIZE;
-  const ctx = canvas.getContext("2d")!;
-  for (let y = 0; y < TEXTURE_SIZE; y++) {
-    for (let x = 0; x < TEXTURE_SIZE; x++) {
-      const c = tex.pixels[y * TEXTURE_SIZE + x];
-      if (!c) continue;
-      ctx.fillStyle = c;
-      ctx.fillRect(x, y, 1, 1);
-    }
-  }
-  viewmodelCanvasCache.set(tex, canvas);
-  return canvas;
-}
-
 /** Bottom-center first-person weapon sprite — swaps to the fire frame while
  * player.viewmodelFlashMs is still counting down (see updatePlayer). No animation beyond
  * that single idle/fire swap (see WeaponSpriteFrames — static frames by design). */
@@ -147,7 +125,7 @@ export function renderViewmodel(ctx: CanvasRenderingContext2D, map: MapData, pla
   const texture = map.textures.find((t) => t.id === parsed.id);
   if (!texture) return;
   ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(viewmodelCanvasFor(texture), x, y, size, size);
+  ctx.drawImage(textureCanvasFor(texture), x, y, size, size);
 }
 
 const OVERLAY_BG = "rgba(0, 0, 0, 0.75)";
@@ -164,14 +142,8 @@ function renderOverlay(ctx: CanvasRenderingContext2D, message: string, width: nu
   ctx.fillText(message, width / 2, height / 2);
 }
 
-/** Full-screen overlay shown once the player reaches map.exit — freezes on top of
- * whatever frame was last rendered (movement is already frozen in updatePlayer). */
-export function renderExitOverlay(ctx: CanvasRenderingContext2D, map: MapData, width: number, height: number): void {
-  renderOverlay(ctx, map.exit.message, width, height);
-}
-
-/** Full-screen overlay shown once currentHealth hits 0 — same freeze-on-top behavior
- * as renderExitOverlay (movement is already frozen in updatePlayer via isDead). */
+/** Full-screen overlay shown once currentHealth hits 0 — freezes on top of whatever
+ * frame was last rendered (movement is already frozen in updatePlayer via isDead). */
 export function renderDeathOverlay(ctx: CanvasRenderingContext2D, width: number, height: number): void {
   renderOverlay(ctx, "YOU DIED", width, height);
 }

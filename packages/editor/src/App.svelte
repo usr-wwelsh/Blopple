@@ -5,6 +5,7 @@
   import PlayTest from "./components/PlayTest.svelte";
   import TextureEditor from "./components/TextureEditor.svelte";
   import MusicEditor from "./components/MusicEditor.svelte";
+  import IntroOutroEditor from "./components/IntroOutroEditor.svelte";
   import WeaponEditor from "./components/WeaponEditor.svelte";
   import EnemyEditor from "./components/EnemyEditor.svelte";
   import WelcomeModal from "./components/WelcomeModal.svelte";
@@ -16,7 +17,7 @@
     showWelcome = false;
   }
 
-  type Tab = "map" | "preview" | "play" | "textures" | "music" | "weapons" | "enemies";
+  type Tab = "map" | "preview" | "play" | "textures" | "music" | "introOutro" | "weapons" | "enemies";
 
   const tabs: { id: Tab; label: string; enabled: boolean }[] = [
     { id: "map", label: "Tile Map", enabled: true },
@@ -24,6 +25,7 @@
     { id: "play", label: "Play", enabled: true },
     { id: "textures", label: "Textures", enabled: true },
     { id: "music", label: "Music", enabled: true },
+    { id: "introOutro", label: "Intro/Outro", enabled: true },
     { id: "weapons", label: "Weapons", enabled: true },
     { id: "enemies", label: "Enemies", enabled: true },
   ];
@@ -119,6 +121,10 @@
     {:else if activeTab === "music"}
       <div class="stage-flex">
         <MusicEditor />
+      </div>
+    {:else if activeTab === "introOutro"}
+      <div class="stage-flex">
+        <IntroOutroEditor />
       </div>
     {:else if activeTab === "weapons"}
       <div class="stage-flex">
