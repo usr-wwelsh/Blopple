@@ -7,13 +7,16 @@
   let { value, onChange }: { value: string | null; onChange: (ref: string | null) => void } = $props();
 
   const parsed = $derived(parseTextureRef(value));
-  let mode = $state<"color" | "texture">(parsed?.kind === "texture" ? "texture" : "color");
+  // null until the user manually picks a tab — lets "none" clear the value without
+  // yanking you out of whichever tab (color/texture) you were browsing
+  let modeOverride = $state<"color" | "texture" | null>(null);
+  const mode = $derived(modeOverride ?? (parsed?.kind === "texture" ? "texture" : "color"));
 </script>
 
 <div class="picker">
   <div class="mode-row">
-    <button class="chip" class:active={mode === "color"} onclick={() => (mode = "color")}>Color</button>
-    <button class="chip" class:active={mode === "texture"} onclick={() => (mode = "texture")}>Texture</button>
+    <button class="chip" class:active={mode === "color"} onclick={() => (modeOverride = "color")}>Color</button>
+    <button class="chip" class:active={mode === "texture"} onclick={() => (modeOverride = "texture")}>Texture</button>
   </div>
 
   {#if mode === "color"}
