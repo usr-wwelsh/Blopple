@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import type { TextureDef } from "@blopple/shared";
   import { TEXTURE_SIZE, KEY_COLOR_HEX, EXIT_COLOR_HEX } from "@blopple/shared";
   import { mapStore } from "../lib/mapStore.svelte";
@@ -46,7 +47,7 @@
     return BASE_CELL_PX * zoom;
   }
 
-  // canvas -> .canvas-wrap (pan margin) -> .grid-pane (the actual scroll viewport)
+  // canvas -> .canvas-wrap (pan margin) -> .stage.canvas-well (the actual scroll viewport)
   function scrollContainer(): HTMLElement | null {
     return canvas.parentElement?.parentElement ?? null;
   }
@@ -245,17 +246,7 @@
     container.scrollTop += worldY * cellPx() - cy;
   }
 
-  function onContextMenu(e: MouseEvent): void {
-    e.preventDefault();
-  }
-
   function onPointerDown(e: PointerEvent): void {
-    if (e.button === 2) {
-      panning = true;
-      lastPanX = e.clientX;
-      lastPanY = e.clientY;
-      return;
-    }
     if (e.button !== 0) return;
     painting = true;
     const { x, y } = cellFromEvent(e);
@@ -263,16 +254,6 @@
   }
 
   function onPointerMove(e: PointerEvent): void {
-    if (panning) {
-      const container = scrollContainer();
-      if (container) {
-        container.scrollLeft -= e.clientX - lastPanX;
-        container.scrollTop -= e.clientY - lastPanY;
-      }
-      lastPanX = e.clientX;
-      lastPanY = e.clientY;
-      return;
-    }
     if (!painting) return;
     const { x, y } = cellFromEvent(e);
     applyTool(x, y);
@@ -280,7 +261,6 @@
 
   function onPointerUp(): void {
     painting = false;
-    panning = false;
   }
 
   $effect(() => {
@@ -296,6 +276,50 @@
       requestAnimationFrame(centerView);
     }
   });
+
+  // right-click-drag pan + wheel zoom are bound to the whole scrollable pane (not just the
+  // canvas) so panning works from the empty space around the tilemap too
+  onMount(() => {
+    const container = scrollContainer();
+    if (!container) return;
+
+    const onPanContextMenu = (e: MouseEvent) => e.preventDefault();
+
+    const onPanPointerDown = (e: PointerEvent) => {
+      if (e.button !== 2) return;
+      panning = true;
+      lastPanX = e.clientX;
+      lastPanY = e.clientY;
+    };
+
+    const onPanPointerMove = (e: PointerEvent) => {
+      if (!panning) return;
+      container.scrollLeft -= e.clientX - lastPanX;
+      container.scrollTop -= e.clientY - lastPanY;
+      lastPanX = e.clientX;
+      lastPanY = e.clientY;
+    };
+
+    const onPanPointerUp = () => {
+      panning = false;
+    };
+
+    container.addEventListener("contextmenu", onPanContextMenu);
+    container.addEventListener("pointerdown", onPanPointerDown);
+    container.addEventListener("pointermove", onPanPointerMove);
+    container.addEventListener("pointerup", onPanPointerUp);
+    container.addEventListener("pointerleave", onPanPointerUp);
+    container.addEventListener("wheel", onWheel, { passive: false });
+
+    return () => {
+      container.removeEventListener("contextmenu", onPanContextMenu);
+      container.removeEventListener("pointerdown", onPanPointerDown);
+      container.removeEventListener("pointermove", onPanPointerMove);
+      container.removeEventListener("pointerup", onPanPointerUp);
+      container.removeEventListener("pointerleave", onPanPointerUp);
+      container.removeEventListener("wheel", onWheel);
+    };
+  });
 </script>
 
 <div class="canvas-wrap">
@@ -305,8 +329,6 @@
     onpointermove={onPointerMove}
     onpointerup={onPointerUp}
     onpointerleave={onPointerUp}
-    onwheel={onWheel}
-    oncontextmenu={onContextMenu}
   ></canvas>
 </div>
 
