@@ -30,7 +30,9 @@
   let debugText = $state("");
 
   onMount(() => {
-    const ctx = canvas.getContext("2d")!;
+    // alpha: false — mirrors packages/runtime/src/main.ts: the canvas is fully repainted
+    // every frame, so skip the alpha-compositing putImageData would otherwise pay for.
+    const ctx = canvas.getContext("2d", { alpha: false })!;
     // cloned, not the live editor map — door unlocks and key pickups mutate map state
     // as you play, and that shouldn't leak back into the map you're editing. Svelte 5's
     // $state proxy can't go through structuredClone (throws "Proxy object could not be

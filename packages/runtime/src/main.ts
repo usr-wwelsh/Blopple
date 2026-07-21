@@ -18,7 +18,10 @@ const canvas = document.createElement("canvas");
 canvas.width = 640;
 canvas.height = 400;
 document.body.appendChild(canvas);
-const ctx = canvas.getContext("2d")!;
+// alpha: false — every pixel is repainted every frame (raycast fill + HUD/viewmodel draws
+// on top), so the canvas never needs a transparent backdrop; telling the browser that up
+// front skips alpha-compositing work putImageData would otherwise pay on every call.
+const ctx = canvas.getContext("2d", { alpha: false })!;
 
 const player = createPlayerState(BLOPPLE_MAP);
 const enemies = createEnemyInstances(BLOPPLE_MAP);
