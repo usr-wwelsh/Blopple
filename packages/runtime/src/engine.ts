@@ -19,14 +19,19 @@ const MAX_PLANE_BANDS = 128;
 
 // x/y -> Cell index, memoized per map object. Cell mutations happen in place
 // (same object, x/y never change) so a cached index stays valid across frames —
-// only rebuilt if a *different* MapData object is passed in.
-const cellIndexCache = new WeakMap<MapData, Map<string, Cell>>();
+// only rebuilt if a *different* MapData object is passed in. Flat array indexed by
+// y*width+x rather than a Map<string, Cell>: cellAt is on the hottest path in the file
+// (every DDA step of every column, every frame, plus every LOS/hitscan/projectile
+// step), and a template-literal key plus string-hash Map lookup was pure overhead next
+// to an O(1), zero-allocation array index. Missing cells stay as `null` holes, same
+// semantics as the old Map's missing-key -> undefined -> null.
+const cellIndexCache = new WeakMap<MapData, (Cell | null)[]>();
 
-function cellIndexFor(map: MapData): Map<string, Cell> {
+function cellIndexFor(map: MapData): (Cell | null)[] {
   let index = cellIndexCache.get(map);
   if (!index) {
-    index = new Map();
-    for (const cell of map.cells) index.set(`${cell.x},${cell.y}`, cell);
+    index = new Array(map.width * map.height).fill(null);
+    for (const cell of map.cells) index[cell.y * map.width + cell.x] = cell;
     cellIndexCache.set(map, index);
   }
   return index;
@@ -35,7 +40,8 @@ function cellIndexFor(map: MapData): Map<string, Cell> {
 export function cellAt(map: MapData, x: number, y: number): Cell | null {
   const cx = Math.floor(x);
   const cy = Math.floor(y);
-  return cellIndexFor(map).get(`${cx},${cy}`) ?? null;
+  if (cx < 0 || cy < 0 || cx >= map.width || cy >= map.height) return null;
+  return cellIndexFor(map)[cy * map.width + cx] ?? null;
 }
 
 // keyed on textures.length too — cells never change count after load, but textures can be
@@ -166,10 +172,21 @@ interface StepHit {
 }
 
 interface ColumnHit {
-  steps: StepHit[];
+  stepCount: number;
   hitDist: number;
   wallCell: Cell | null;
   side: 0 | 1;
+}
+
+// Reused across columns/frames — castColumn used to allocate a fresh StepHit[] plus a
+// fresh object per step, every column, every frame (up to maxSteps of each). Pooled here
+// the same way layerPool eliminated the equivalent per-column allocation for DepthLayer
+// (see that comment) — renderFrame reads this pool directly via stepCount instead of a
+// returned array.
+const stepPool: StepHit[] = [];
+
+function ensureStepPool(minSize: number): void {
+  while (stepPool.length < minSize) stepPool.push({ dist: 0, height: 0, cell: null, side: 0 });
 }
 
 /** DDA grid march: walks cell-by-cell along the ray, recording floor-height
@@ -190,13 +207,20 @@ function castColumn(map: MapData, camera: Camera, rayDirX: number, rayDirY: numb
   let sideDistX = rayDirX < 0 ? (camera.x - mapX) * deltaDistX : (mapX + 1 - camera.x) * deltaDistX;
   let sideDistY = rayDirY < 0 ? (camera.y - mapY) * deltaDistY : (mapY + 1 - camera.y) * deltaDistY;
 
+  const maxSteps = map.width + map.height;
+  ensureStepPool(maxSteps + 1);
+
   const startCell = cellAt(map, camera.x, camera.y);
-  const steps: StepHit[] = [{ dist: 0, height: startCell?.height ?? 0, cell: startCell, side: 0 }];
+  stepPool[0].dist = 0;
+  stepPool[0].height = startCell?.height ?? 0;
+  stepPool[0].cell = startCell;
+  stepPool[0].side = 0;
+  let stepCount = 1;
+
   let side: 0 | 1 = 0;
   let hitDist = MAX_RENDER_DIST;
   let wallCell: Cell | null = null;
 
-  const maxSteps = map.width + map.height;
   for (let i = 0; i < maxSteps; i++) {
     if (sideDistX < sideDistY) {
       sideDistX += deltaDistX;
@@ -223,10 +247,14 @@ function castColumn(map: MapData, camera: Camera, rayDirX: number, rayDirY: numb
       break;
     }
 
-    steps.push({ dist: perpDist, height: cell.height, cell, side });
+    const step = stepPool[stepCount++];
+    step.dist = perpDist;
+    step.height = cell.height;
+    step.cell = cell;
+    step.side = side;
   }
 
-  return { steps, hitDist, wallCell, side };
+  return { stepCount, hitDist, wallCell, side };
 }
 
 // keyed by hex string — the same handful of colors get sampled millions of
@@ -1013,7 +1041,8 @@ export function renderFrame(
     const cameraX = (2 * col) / width - 1;
     const rayDirX = fwdX + planeX * cameraX;
     const rayDirY = fwdY + planeY * cameraX;
-    const { steps, hitDist, wallCell, side } = castColumn(map, camera, rayDirX, rayDirY);
+    const { stepCount, hitDist, wallCell, side } = castColumn(map, camera, rayDirX, rayDirY);
+    const steps = stepPool;
 
     const corrected = Math.max(hitDist, 0.0001);
     const scale = height / corrected;
@@ -1021,7 +1050,7 @@ export function renderFrame(
     // whichever riser (if any) sits closer than it; feeds depthBuffer for sprite occlusion
     let colOpaqueDist = corrected;
 
-    const baseFloorHeight = steps[steps.length - 1].height;
+    const baseFloorHeight = steps[stepCount - 1].height;
     const sideMul = side === 1 ? 0.75 : 1;
     // unclamped — kept exactly as projected so an up-close wall's texture overflows the
     // screen and gets cropped at the edges (see the row-bounds comment below), instead of
@@ -1037,7 +1066,7 @@ export function renderFrame(
 
     resetCovered();
 
-    ensureLayerPool(steps.length * 2);
+    ensureLayerPool(stepCount * 2);
     let layerCount = 0;
     // Coalesces consecutive steps into one floor/ceiling layer when they'd render
     // identically anyway (same height, same floor+ceiling texture, no door/exit/pickup
@@ -1047,12 +1076,12 @@ export function renderFrame(
     // break at any decal-bearing cell so door borders/exit rings/pickups still render
     // individually and exactly where they are.
     let i = 0;
-    while (i < steps.length) {
+    while (i < stepCount) {
       const cell = steps[i].cell;
       let j = i;
       if (!cellHasFloorDecal(map, cell, exitCellX, exitCellY, heldKeys, collectedWeaponIds)) {
         while (
-          j + 1 < steps.length &&
+          j + 1 < stepCount &&
           steps[j + 1].height === steps[i].height &&
           (steps[j + 1].cell?.floorTextureId ?? null) === (cell?.floorTextureId ?? null) &&
           (steps[j + 1].cell?.ceilingTextureId ?? null) === (cell?.ceilingTextureId ?? null) &&
@@ -1061,7 +1090,7 @@ export function renderFrame(
           j++;
         }
       }
-      const segFar = j + 1 < steps.length ? steps[j + 1].dist : hitDist;
+      const segFar = j + 1 < stepCount ? steps[j + 1].dist : hitDist;
       if (segFar > steps[i].dist) {
         const layer = layerPool[layerCount++];
         layer.dist = steps[i].dist;
@@ -1071,7 +1100,7 @@ export function renderFrame(
       }
       i = j + 1;
     }
-    for (let i = steps.length - 1; i > 0; i--) {
+    for (let i = stepCount - 1; i > 0; i--) {
       // only a riser as a step rising in front of the viewer (far > near) — with no camera
       // pitch there's no "looking down over the ledge" view to render for the opposite
       // (descending) case
@@ -1119,7 +1148,7 @@ export function renderFrame(
       const i = layer.i;
       if (layer.kind === 0) {
         const segNear = steps[i].dist;
-        const segFar = layer.iEnd + 1 < steps.length ? steps[layer.iEnd + 1].dist : hitDist;
+        const segFar = layer.iEnd + 1 < stepCount ? steps[layer.iEnd + 1].dist : hitDist;
         const cell = steps[i].cell;
 
         const floorWorldY = steps[i].height * HEIGHT_STEP;

@@ -76,7 +76,8 @@ function loop(now: number): void {
   updateEnemies(enemies, dt);
   playMusic(BLOPPLE_MAP, BLOPPLE_MAP.music.gameplaySongId);
 
-  const billboards = [...enemyBillboards(enemies), ...projectileBillboards(projectiles)];
+  const billboards = enemyBillboards(enemies);
+  for (const b of projectileBillboards(projectiles)) billboards.push(b);
   renderFrame(ctx, BLOPPLE_MAP, camera, canvas.width, canvas.height, player.keys, new Set(player.heldWeaponIds), billboards);
   renderViewmodel(ctx, BLOPPLE_MAP, player, canvas.width, canvas.height);
   renderHud(ctx, player, canvas.width, canvas.height);
