@@ -68,6 +68,7 @@
             if (!editing) return;
             editing.behavior = (e.target as HTMLSelectElement).value as EnemyBehavior;
             if (editing.behavior !== "chase" && editing.projectileSpeed === null) editing.projectileSpeed = 5;
+            if (editing.behavior !== "chase" && editing.attackRangeCells === 1) editing.attackRangeCells = 8;
           }}
         >
           {#each behaviors as b (b)}
