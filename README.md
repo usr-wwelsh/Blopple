@@ -4,16 +4,12 @@ A no-code, browser-based Doom-style map/enemy/music editor that exports standalo
 
 ## Progress
 
-- **Map editor** — paint walls/floors/ceilings/doors, three height levels, brush sizes, zoom/pan, live three.js 3D preview, in-editor playtest, JSON export/import.
+- **Map editor** — paint walls/floors/ceilings/doors, three height levels, brush sizes, zoom/pan, live three.js 3D preview, in-editor playtest, JSON export/import, standalone HTML export (bundles map + runtime into one playable `.html`).
 - **Textures** — pixel-art tool for authoring wall/floor textures.
 - **Music/SFX** — tracker-style song editor, synth/instrument controls, one-shot SFX editor.
 - **Keys/doors + exit** — 4 colored keys, matching locked doors, and an exit trigger to complete a map.
 - **Weapons** — weapon editor (behavior template, damage/fire-rate/range stats, idle/fire sprite refs into the texture editor, fire sfx), map pickups, player equip/switch (1-4 keys) and cooldown-gated firing with real SFX and a viewmodel.
 - **Enemies** — enemy editor (chase/stationary/ranged AI behavior templates, health/damage/speed/attack-range/detection-range stats, billboard sprite ref into the texture editor), live per-instance runtime state, chase/kite AI with line-of-sight gating, and weapons' melee/hitscan/projectile behaviors resolve real hits against them. Death/respawn flow with input-locked respawn.
-
-## Roadmap
-
-1. **Export pipeline** — bundle map JSON + runtime engine + assets into a single minified `index.html`, ~1MB target. Right now export/import only round-trips map *data* for editing, not a playable build.
 
 ## Known limitations (deliberately deferred, not bugs)
 
