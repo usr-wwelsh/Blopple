@@ -3,8 +3,22 @@
   import { mapStore } from "../lib/mapStore.svelte";
   import { toolStore, type PixelTool, BRUSH_SIZES } from "../lib/toolStore.svelte";
   import { PALETTE } from "../lib/color";
+  import { HistoryStack } from "../lib/history.svelte";
   import TextureThumb from "./TextureThumb.svelte";
   import ImageImportModal from "./ImageImportModal.svelte";
+
+  // one undo/redo stack per texture, keyed by id — created lazily, kept for the life of this
+  // component (destroyed on tab switch, same lifetime as the textureCanvasCache in MapGrid)
+  const pixelHistories = new Map<string, HistoryStack<(string | null)[]>>();
+
+  function historyFor(id: string): HistoryStack<(string | null)[]> {
+    let h = pixelHistories.get(id);
+    if (!h) {
+      h = new HistoryStack();
+      pixelHistories.set(id, h);
+    }
+    return h;
+  }
 
   const BASE_PIXEL_PX = 8;
   const MIN_ZOOM = 0.25;
@@ -28,6 +42,7 @@
   let zoom = 1;
 
   const editing = $derived(editingId ? mapStore.textureAt(editingId) : undefined);
+  const currentHistory = $derived(editingId ? historyFor(editingId) : undefined);
 
   function pixelPx(): number {
     return BASE_PIXEL_PX * zoom;
@@ -138,6 +153,7 @@
     }
     if (e.button !== 0) return;
     painting = true;
+    if (currentHistory && editing) currentHistory.begin([...editing.pixels]);
     paintAt(e);
   }
 
@@ -157,8 +173,21 @@
   }
 
   function onPointerUp(): void {
+    if (painting && currentHistory && editing) currentHistory.commit([...editing.pixels]);
     painting = false;
     panning = false;
+  }
+
+  function undoPixels(): void {
+    if (!currentHistory || !editing) return;
+    const prev = currentHistory.undo([...editing.pixels]);
+    if (prev) editing.pixels = prev;
+  }
+
+  function redoPixels(): void {
+    if (!currentHistory || !editing) return;
+    const next = currentHistory.redo([...editing.pixels]);
+    if (next) editing.pixels = next;
   }
 
   function newTexture(): void {
@@ -199,7 +228,11 @@
   }
 
   function applyImport(pixels: (string | null)[]): void {
-    if (editing) editing.pixels = pixels;
+    if (editing && currentHistory) {
+      currentHistory.begin([...editing.pixels]);
+      editing.pixels = pixels;
+      currentHistory.commit([...pixels]);
+    }
     closeImport();
     draw();
   }
@@ -226,6 +259,12 @@
 
 <div class="texture-editor">
   <div class="sidebar">
+    <div class="section-label">History</div>
+    <div class="sidebar-actions">
+      <button disabled={!currentHistory?.canUndo} onclick={undoPixels}>Undo</button>
+      <button disabled={!currentHistory?.canRedo} onclick={redoPixels}>Redo</button>
+    </div>
+    <div class="section-label">Texture</div>
     <div class="sidebar-actions">
       <button onclick={newTexture}>New</button>
       <button onclick={duplicateTexture} disabled={!editingId}>Duplicate</button>
@@ -322,6 +361,13 @@
     padding: 0.5rem;
     gap: 0.5rem;
     overflow-y: auto;
+  }
+  .section-label {
+    color: #888;
+    font-size: 0.7em;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: -0.25rem;
   }
   .sidebar-actions {
     display: flex;
