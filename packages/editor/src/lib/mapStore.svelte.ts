@@ -10,8 +10,18 @@ import {
   emptyIntroOutroConfig,
 } from "@blopple/shared";
 import { INSTRUMENT_PRESETS } from "./musicPresets";
+import { HistoryStack } from "./history.svelte";
 
 const DEFAULT_SIZE = 48;
+
+interface CanvasSnapshot {
+  cells: Cell[];
+  playerStart: MapData["playerStart"];
+  exit: MapData["exit"];
+  keyPickups: MapData["keyPickups"];
+  weaponPickups: MapData["weaponPickups"];
+  enemies: MapData["enemies"];
+}
 
 function buildCells(width: number, height: number): Cell[] {
   const cells: Cell[] = [];
@@ -94,6 +104,10 @@ class MapStore {
   // cell mutations happen in place so x/y never change and the index stays valid
   #index = new Map<string, Cell>();
 
+  // undo/redo for the tilemap canvas: cell painting plus the click-placed markers
+  // (player start, exit, keys, weapon/enemy pickups) that live on the same canvas
+  #canvasHistory = new HistoryStack<CanvasSnapshot>();
+
   constructor() {
     this.#reindex();
   }
@@ -107,9 +121,61 @@ class MapStore {
     return this.#index.get(`${x},${y}`);
   }
 
+  // structuredClone() can throw DataCloneError on Svelte 5 $state proxies — $state.snapshot()
+  // is the supported way to pull a plain deep copy out of reactive state
+  #canvasSnapshot(): CanvasSnapshot {
+    return {
+      cells: $state.snapshot(this.map.cells),
+      playerStart: $state.snapshot(this.map.playerStart),
+      exit: $state.snapshot(this.map.exit),
+      keyPickups: $state.snapshot(this.map.keyPickups),
+      weaponPickups: $state.snapshot(this.map.weaponPickups),
+      enemies: $state.snapshot(this.map.enemies),
+    };
+  }
+
+  #applyCanvasSnapshot(snap: CanvasSnapshot): void {
+    this.map.cells = snap.cells;
+    this.map.playerStart = snap.playerStart;
+    this.map.exit = snap.exit;
+    this.map.keyPickups = snap.keyPickups;
+    this.map.weaponPickups = snap.weaponPickups;
+    this.map.enemies = snap.enemies;
+    this.#reindex();
+  }
+
+  get canUndoCanvas(): boolean {
+    return this.#canvasHistory.canUndo;
+  }
+
+  get canRedoCanvas(): boolean {
+    return this.#canvasHistory.canRedo;
+  }
+
+  /** Call before a canvas edit gesture (pointer down) starts. */
+  beginCanvasEdit(): void {
+    this.#canvasHistory.begin(this.#canvasSnapshot());
+  }
+
+  /** Call once the canvas edit gesture (pointer up) ends. */
+  commitCanvasEdit(): void {
+    this.#canvasHistory.commit(this.#canvasSnapshot());
+  }
+
+  undoCanvas(): void {
+    const prev = this.#canvasHistory.undo(this.#canvasSnapshot());
+    if (prev) this.#applyCanvasSnapshot(prev);
+  }
+
+  redoCanvas(): void {
+    const next = this.#canvasHistory.redo(this.#canvasSnapshot());
+    if (next) this.#applyCanvasSnapshot(next);
+  }
+
   newMap(width: number, height: number): void {
     this.map = emptyMap(width, height);
     this.#reindex();
+    this.#canvasHistory.reset();
   }
 
   loadMap(data: MapData): void {
@@ -186,6 +252,7 @@ class MapStore {
     }
     this.map = data;
     this.#reindex();
+    this.#canvasHistory.reset();
   }
 
   setKeyPickup(color: KeyColor, x: number, y: number): void {

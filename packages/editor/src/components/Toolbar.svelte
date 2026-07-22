@@ -36,6 +36,14 @@
 
 <aside class="side-panel">
   <div class="panel-section">
+    <div class="section-label">History</div>
+    <div class="option-row">
+      <button class="chip" disabled={!mapStore.canUndoCanvas} onclick={() => mapStore.undoCanvas()}>Undo</button>
+      <button class="chip" disabled={!mapStore.canRedoCanvas} onclick={() => mapStore.redoCanvas()}>Redo</button>
+    </div>
+  </div>
+
+  <div class="panel-section">
     <div class="section-label">Tools</div>
     <div class="icon-grid">
       {#each tools as t (t.id)}
@@ -253,6 +261,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .chip:disabled {
+    color: var(--text-dim);
+    cursor: not-allowed;
   }
   .chip.active,
   .list-chip.active {

@@ -249,6 +249,7 @@
   function onPointerDown(e: PointerEvent): void {
     if (e.button !== 0) return;
     painting = true;
+    mapStore.beginCanvasEdit();
     const { x, y } = cellFromEvent(e);
     applyTool(x, y);
   }
@@ -260,6 +261,7 @@
   }
 
   function onPointerUp(): void {
+    if (painting) mapStore.commitCanvasEdit();
     painting = false;
   }
 
