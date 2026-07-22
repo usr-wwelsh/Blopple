@@ -1,6 +1,10 @@
 <script lang="ts">
-  const { onClose, onExportJson, onExportSession }: { onClose: () => void; onExportJson: () => void; onExportSession: () => void } =
-    $props();
+  const {
+    onClose,
+    onExportJson,
+    onExportSession,
+    onExportHtml,
+  }: { onClose: () => void; onExportJson: () => void; onExportSession: () => void; onExportHtml: () => void } = $props();
 
   function handle(action: () => void): void {
     action();
@@ -21,9 +25,9 @@
         <span class="label">Session</span>
         <span class="desc">Save into Recent Saves for later</span>
       </button>
-      <button class="option" disabled title="Not yet implemented">
+      <button class="option" onclick={() => handle(onExportHtml)}>
         <span class="label">HTML</span>
-        <span class="desc">Standalone playable page — coming soon</span>
+        <span class="desc">Standalone playable page — .html file</span>
       </button>
     </div>
 

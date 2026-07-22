@@ -14,6 +14,7 @@
   import { mapStore } from "./lib/mapStore.svelte";
   import { saveRecentSave } from "./lib/recentSaves";
   import type { MapData } from "@blopple/shared";
+  import gameJs from "@blopple/runtime/dist/game.js?raw";
 
   let showWelcome = $state(true);
   let showRecentSaves = $state(false);
@@ -61,18 +62,44 @@
     showWelcome = false;
   }
 
-  function exportJson(): void {
-    const blob = new Blob([JSON.stringify(mapStore.map, null, 2)], { type: "application/json" });
+  function downloadFile(filename: string, content: string, mimeType: string): void {
+    const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${mapStore.map.name || "map"}.json`;
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
   }
 
+  function exportJson(): void {
+    downloadFile(`${mapStore.map.name || "map"}.json`, JSON.stringify(mapStore.map, null, 2), "application/json");
+  }
+
   function exportSession(): void {
     saveRecentSave(mapStore.map);
+  }
+
+  function exportHtml(): void {
+    // Built as "<" + "/script>" so this literal substring never appears in App.svelte's own
+    // source — Svelte parses <script> blocks like HTML and would truncate this file's script tag
+    // at the first occurrence. Same reason the map JSON / bundle text get escaped below: either
+    // could otherwise contain "</script" and truncate the *generated* HTML's tags instead.
+    const scriptClose = "<" + "/script>";
+    const escapeScriptClose = (s: string) => s.replace(/<\/script/gi, "<\\/script");
+    const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    // Explicit head/body: without them the parser puts both <script> tags in an implicit <head>,
+    // so document.body is still null when the bundle runs (main.ts appends the canvas to it).
+    const html = `<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>${escapeHtml(mapStore.map.name || "map")}</title></head>
+<body>
+<script>const BLOPPLE_MAP = ${escapeScriptClose(JSON.stringify(mapStore.map))};${scriptClose}
+<script>${escapeScriptClose(gameJs)}${scriptClose}
+</body>
+</html>
+`;
+    downloadFile(`${mapStore.map.name || "map"}.html`, html, "text/html");
   }
 
   function importMap(e: Event): void {
@@ -132,7 +159,12 @@
   {/if}
 
   {#if showExport}
-    <ExportModal onClose={() => (showExport = false)} onExportJson={exportJson} onExportSession={exportSession} />
+    <ExportModal
+      onClose={() => (showExport = false)}
+      onExportJson={exportJson}
+      onExportSession={exportSession}
+      onExportHtml={exportHtml}
+    />
   {/if}
 
   <div class="workspace">

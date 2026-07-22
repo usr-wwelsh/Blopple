@@ -5,8 +5,8 @@
     "packages/*"
   ],
   "scripts": {
-    "editor:dev": "bun run --filter=@blopple/editor dev",
-    "editor:build": "bun run --filter=@blopple/editor build",
+    "editor:dev": "bun run runtime:build && bun run --filter=@blopple/editor dev",
+    "editor:build": "bun run runtime:build && bun run --filter=@blopple/editor build",
     "runtime:build": "bun run --filter=@blopple/runtime build"
   }
 }
