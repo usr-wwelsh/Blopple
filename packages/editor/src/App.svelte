@@ -56,6 +56,11 @@
     mapStore.newMap(newWidth, newHeight);
   }
 
+  function startFresh(): void {
+    mapStore.newMap(newWidth, newHeight);
+    showWelcome = false;
+  }
+
   function exportJson(): void {
     const blob = new Blob([JSON.stringify(mapStore.map, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -78,6 +83,7 @@
       mapStore.loadMap(JSON.parse(text));
     });
     input.value = "";
+    showWelcome = false;
   }
 </script>
 
@@ -106,18 +112,19 @@
       <input class="dim" type="number" min="8" max="256" bind:value={newHeight} />
       <button onclick={createNewMap}>New Map</button>
       <div class="divider"></div>
-      <button onclick={() => (showExport = true)}>Export</button>
-      <label class="import">
-        Import
-        <input type="file" accept="application/json" onchange={importMap} />
-      </label>
+      <button onclick={() => (showExport = true)}>Save</button>
       <div class="divider"></div>
       <button class="help" title="Show welcome guide" aria-label="Help" onclick={() => (showWelcome = true)}>?</button>
     </div>
   </div>
 
   {#if showWelcome}
-    <WelcomeModal onClose={dismissWelcome} onOpenRecentSaves={openRecentSaves} />
+    <WelcomeModal
+      onStartFresh={startFresh}
+      onOpenRecentSaves={openRecentSaves}
+      onImport={importMap}
+      onDismiss={dismissWelcome}
+    />
   {/if}
 
   {#if showRecentSaves}
@@ -271,26 +278,6 @@
     border-radius: 2px;
     padding: 0.3rem;
     font: inherit;
-  }
-  .import {
-    position: relative;
-    overflow: hidden;
-    background: var(--bg-control);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 2px;
-    box-shadow: inset 0 1px 0 var(--border-light);
-    padding: 0.3rem 0.6rem;
-    cursor: pointer;
-  }
-  .import:hover {
-    background: var(--bg-control-hover);
-  }
-  .import input {
-    position: absolute;
-    inset: 0;
-    opacity: 0;
-    cursor: pointer;
   }
   .workspace {
     flex: 1;

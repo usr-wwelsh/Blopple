@@ -1,10 +1,23 @@
 <script lang="ts">
-  const { onClose, onOpenRecentSaves }: { onClose: () => void; onOpenRecentSaves: () => void } = $props();
+  const {
+    onStartFresh,
+    onOpenRecentSaves,
+    onImport,
+    onDismiss,
+  }: {
+    onStartFresh: () => void;
+    onOpenRecentSaves: () => void;
+    onImport: (e: Event) => void;
+    onDismiss: () => void;
+  } = $props();
 </script>
 
 <div class="modal-backdrop">
   <div class="modal">
-    <span class="brand">Blopple</span>
+    <div class="header">
+      <span class="brand">Blopple</span>
+      <button class="dismiss" aria-label="Close" onclick={onDismiss}>&times;</button>
+    </div>
 
     <div class="controls">
       <div class="control highlight">
@@ -18,8 +31,12 @@
     </div>
 
     <div class="actions">
-      <button class="start-fresh" onclick={onClose}>Start Fresh</button>
+      <button class="start-fresh" onclick={onStartFresh}>Start Fresh</button>
       <button class="load-recent" onclick={onOpenRecentSaves}>Load Recent Save</button>
+      <label class="import">
+        Import
+        <input type="file" accept="application/json" onchange={onImport} />
+      </label>
     </div>
   </div>
 </div>
@@ -46,10 +63,27 @@
     flex-direction: column;
     gap: 0.9rem;
   }
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
   .brand {
     color: var(--accent);
     font-weight: bold;
     letter-spacing: 0.04em;
+  }
+  .dismiss {
+    background: transparent;
+    color: var(--text-dim);
+    border: none;
+    font-size: 1.3em;
+    line-height: 1;
+    padding: 0;
+    cursor: pointer;
+  }
+  .dismiss:hover {
+    color: var(--text);
   }
   .controls {
     display: flex;
@@ -100,5 +134,26 @@
   .start-fresh:hover,
   .load-recent:hover {
     background: var(--bg-control-hover);
+  }
+  .import {
+    position: relative;
+    overflow: hidden;
+    background: var(--bg-control);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    box-shadow: inset 0 1px 0 var(--border-light);
+    padding: 0.35rem 0.9rem;
+    cursor: pointer;
+    font: inherit;
+  }
+  .import:hover {
+    background: var(--bg-control-hover);
+  }
+  .import input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
   }
 </style>
