@@ -13,11 +13,28 @@ declare const BLOPPLE_MAP: MapData;
 
 document.body.style.margin = "0";
 document.body.style.background = "#000";
+document.body.style.height = "100vh";
+document.body.style.overflow = "hidden";
+document.body.style.display = "flex";
+document.body.style.alignItems = "center";
+document.body.style.justifyContent = "center";
 
 const canvas = document.createElement("canvas");
 canvas.width = 640;
 canvas.height = 400;
+canvas.style.imageRendering = "pixelated";
 document.body.appendChild(canvas);
+// raster stays fixed at 640x400 (renderFrame's raycast cost scales with these); CSS just
+// scales the drawn buffer up to fill the screen. Aspect-ratio-preserving (letterboxed) for
+// now — TODO: swap for a settings-menu toggle between this and an edge-to-edge stretch.
+function resizeCanvas(): void {
+  const scale = Math.min(window.innerWidth / canvas.width, window.innerHeight / canvas.height);
+  canvas.style.width = `${canvas.width * scale}px`;
+  canvas.style.height = `${canvas.height * scale}px`;
+}
+window.addEventListener("resize", resizeCanvas);
+document.addEventListener("fullscreenchange", resizeCanvas);
+resizeCanvas();
 // alpha: false — every pixel is repainted every frame (raycast fill + HUD/viewmodel draws
 // on top), so the canvas never needs a transparent backdrop; telling the browser that up
 // front skips alpha-compositing work putImageData would otherwise pay on every call.
@@ -60,6 +77,7 @@ window.addEventListener("keydown", () => {
 canvas.addEventListener("mousedown", () => {
   beginPlaying();
   respawn();
+  if (!document.fullscreenElement) canvas.requestFullscreen().catch(() => {});
 });
 
 let last = performance.now();
