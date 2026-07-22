@@ -9,12 +9,28 @@
   import WeaponEditor from "./components/WeaponEditor.svelte";
   import EnemyEditor from "./components/EnemyEditor.svelte";
   import WelcomeModal from "./components/WelcomeModal.svelte";
+  import RecentSavesModal from "./components/RecentSavesModal.svelte";
+  import ExportModal from "./components/ExportModal.svelte";
   import { mapStore } from "./lib/mapStore.svelte";
+  import { saveRecentSave } from "./lib/recentSaves";
+  import type { MapData } from "@blopple/shared";
 
   let showWelcome = $state(true);
+  let showRecentSaves = $state(false);
+  let showExport = $state(false);
 
   function dismissWelcome(): void {
     showWelcome = false;
+  }
+
+  function openRecentSaves(): void {
+    showWelcome = false;
+    showRecentSaves = true;
+  }
+
+  function loadRecentSave(map: MapData): void {
+    mapStore.loadMap(map);
+    showRecentSaves = false;
   }
 
   type Tab = "map" | "preview" | "play" | "textures" | "music" | "introOutro" | "weapons" | "enemies";
@@ -40,7 +56,7 @@
     mapStore.newMap(newWidth, newHeight);
   }
 
-  function exportMap(): void {
+  function exportJson(): void {
     const blob = new Blob([JSON.stringify(mapStore.map, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -48,6 +64,10 @@
     a.download = `${mapStore.map.name || "map"}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  function exportSession(): void {
+    saveRecentSave(mapStore.map);
   }
 
   function importMap(e: Event): void {
@@ -86,7 +106,7 @@
       <input class="dim" type="number" min="8" max="256" bind:value={newHeight} />
       <button onclick={createNewMap}>New Map</button>
       <div class="divider"></div>
-      <button onclick={exportMap}>Export</button>
+      <button onclick={() => (showExport = true)}>Export</button>
       <label class="import">
         Import
         <input type="file" accept="application/json" onchange={importMap} />
@@ -97,7 +117,15 @@
   </div>
 
   {#if showWelcome}
-    <WelcomeModal onClose={dismissWelcome} />
+    <WelcomeModal onClose={dismissWelcome} onOpenRecentSaves={openRecentSaves} />
+  {/if}
+
+  {#if showRecentSaves}
+    <RecentSavesModal onClose={() => (showRecentSaves = false)} onLoad={loadRecentSave} />
+  {/if}
+
+  {#if showExport}
+    <ExportModal onClose={() => (showExport = false)} onExportJson={exportJson} onExportSession={exportSession} />
   {/if}
 
   <div class="workspace">
