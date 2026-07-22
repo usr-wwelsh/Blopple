@@ -1275,8 +1275,8 @@ export function renderFrame(
             const riserSide = steps[i].side;
             let riserU = riserSide === 0 ? camera.y + riserDist * rayDirY : camera.x + riserDist * rayDirX;
             riserU -= Math.floor(riserU);
-            if (riserSide === 0 && rayDirX > 0) riserU = 1 - riserU;
-            if (riserSide === 1 && rayDirY < 0) riserU = 1 - riserU;
+            if (riserSide === 0 && rayDirX < 0) riserU = 1 - riserU;
+            if (riserSide === 1 && rayDirY > 0) riserU = 1 - riserU;
             const riserTexX = Math.min(TEXTURE_SIZE - 1, Math.max(0, Math.floor(riserU * TEXTURE_SIZE)));
             writeTexturedWallColumn(
               buf32, width, height, col, riserTexture, riserTexX, rA, rB, 0.85, riserDist,
@@ -1310,8 +1310,8 @@ export function renderFrame(
         // standard way to recover it when hitDist is a perpendicular (not Euclidean) distance
         let wallU = side === 0 ? camera.y + hitDist * rayDirY : camera.x + hitDist * rayDirX;
         wallU -= Math.floor(wallU);
-        if (side === 0 && rayDirX > 0) wallU = 1 - wallU;
-        if (side === 1 && rayDirY < 0) wallU = 1 - wallU;
+        if (side === 0 && rayDirX < 0) wallU = 1 - wallU;
+        if (side === 1 && rayDirY > 0) wallU = 1 - wallU;
         const texX = Math.min(TEXTURE_SIZE - 1, Math.max(0, Math.floor(wallU * TEXTURE_SIZE)));
 
         computeGaps(wallClampTop, wallClampBottom);
