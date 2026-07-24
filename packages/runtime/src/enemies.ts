@@ -2,9 +2,18 @@ import type { EnemyBehavior, MapData } from "@blopple/shared";
 import { isSolid, raycastWallDistance, type Billboard } from "./engine";
 import { damagePlayer, type PlayerState } from "./player";
 import type { Projectile } from "./combat";
+import { findPath } from "./pathfinding";
 
 const HIT_FLASH_MS = 150;
 const HIT_FLASH_COLOR = "#ff2020";
+/** How often a pathing enemy recomputes its route to the player — frequent enough to
+ * react to the player moving, cheap enough for several enemies to path in the same
+ * frame batch. */
+const PATH_RECOMPUTE_MS = 500;
+/** Waypoint reached once within this distance — small relative to a cell so the enemy
+ * doesn't orbit the point, generous enough that speed*dt overshoot on a slow frame still
+ * counts as arrival. */
+const WAYPOINT_EPSILON = 0.15;
 
 /** Per-placement runtime state resolved from map.enemies + map.enemyDefs. */
 export interface EnemyInstance {
@@ -29,6 +38,11 @@ export interface EnemyInstance {
   projectileSpriteRef: string | null;
   /** counts down from attackRateMs after landing an attack, mirrors PlayerState.fireCooldownMs */
   attackCooldownMs: number;
+  /** queued cell-center waypoints to the player, used when line of sight is blocked;
+   * null when idle/in direct pursuit. See findPath in pathfinding.ts. */
+  path: { x: number; y: number }[] | null;
+  /** counts down to the next path recompute; only ticks while a path is in use */
+  pathRecomputeMs: number;
 }
 
 export function createEnemyInstances(map: MapData): EnemyInstance[] {
@@ -55,6 +69,8 @@ export function createEnemyInstances(map: MapData): EnemyInstance[] {
         projectileSpeed: def.projectileSpeed,
         projectileSpriteRef: def.projectileSpriteRef,
         attackCooldownMs: 0,
+        path: null,
+        pathRecomputeMs: 0,
       },
     ];
   });
@@ -78,16 +94,47 @@ function tryMoveEnemy(map: MapData, x: number, y: number, dx: number, dy: number
   return { x: nx, y: ny };
 }
 
-/** An enemy only reacts once the player is within detectionRangeCells AND in line of
- * sight (checked via the same raycastWallDistance helper combat.ts uses for hitscan) —
- * hide behind a wall and it stays idle even if you're close. Once aware, behavior
- * branches: "chase" closes distance and melee-attacks (instant damage) in range;
- * "stationary" never moves and fires a projectile (via combat.ts's updateProjectiles)
- * at anything that wanders into range (turret/sentry); "ranged" fires the same kind of
- * projectile from range and backs away for as long as the player stays within
- * attackRangeCells (kiting), closing distance again once out of range. No pathfinding in
- * any case: an enemy on the wrong side of a wall just stops advancing (or retreating)
- * until line of sight opens up. */
+/** Drives movement for an enemy that can't see the player directly: follows (and
+ * periodically refreshes) an A* route toward the player's current cell, advancing
+ * through waypoints one at a time. Leaves enemy.x/y untouched if no path exists (e.g.
+ * the player's cell is unreachable) — same end result as the old no-LOS behavior of
+ * standing still, just retried every PATH_RECOMPUTE_MS instead of every frame. */
+function moveAlongPath(enemy: EnemyInstance, map: MapData, player: PlayerState, dt: number): void {
+  enemy.pathRecomputeMs -= dt * 1000;
+  if (!enemy.path || enemy.path.length === 0 || enemy.pathRecomputeMs <= 0) {
+    enemy.path = findPath(map, enemy.x, enemy.y, player.x, player.y);
+    enemy.pathRecomputeMs = PATH_RECOMPUTE_MS;
+  }
+  if (!enemy.path || enemy.path.length === 0) return;
+
+  const waypoint = enemy.path[0];
+  const wdx = waypoint.x - enemy.x;
+  const wdy = waypoint.y - enemy.y;
+  const wdist = Math.hypot(wdx, wdy);
+  if (wdist < WAYPOINT_EPSILON) {
+    enemy.path.shift();
+    return;
+  }
+
+  const step = Math.min(enemy.speed * dt, wdist);
+  const moved = tryMoveEnemy(map, enemy.x, enemy.y, (wdx / wdist) * step, (wdy / wdist) * step, enemy.width / 2);
+  enemy.x = moved.x;
+  enemy.y = moved.y;
+}
+
+/** An enemy only reacts once the player is within detectionRangeCells (straight-line,
+ * walls don't block detection itself — only attacking and direct-line movement need
+ * line of sight, checked via the same raycastWallDistance helper combat.ts uses for
+ * hitscan). Once aware, behavior branches: "chase" closes distance and melee-attacks
+ * (instant damage) in range; "stationary" never moves and fires a projectile (via
+ * combat.ts's updateProjectiles) at anything that wanders into range (turret/sentry);
+ * "ranged" fires the same kind of projectile from range and backs away for as long as
+ * the player stays within attackRangeCells (kiting), closing distance again once out of
+ * range. Attacking always requires line of sight (no shooting through walls). Movement
+ * prefers a direct line when LOS is clear; when it's blocked, "chase" and "ranged" fall
+ * back to an A* route around the wall (see pathfinding.ts's findPath) instead of just
+ * stopping — recomputed every PATH_RECOMPUTE_MS to track the player. "stationary"
+ * enemies never path, matching that they never move at all. */
 export function updateEnemyAI(
   enemies: EnemyInstance[],
   map: MapData,
@@ -104,12 +151,20 @@ export function updateEnemyAI(
     const dx = player.x - enemy.x;
     const dy = player.y - enemy.y;
     const dist = Math.hypot(dx, dy);
-    if (dist <= 0 || dist > enemy.detectionRangeCells) continue;
+    if (dist <= 0 || dist > enemy.detectionRangeCells) {
+      enemy.path = null;
+      continue;
+    }
 
     const dirX = dx / dist;
     const dirY = dy / dist;
     const hasLineOfSight = raycastWallDistance(map, enemy.x, enemy.y, dirX, dirY, dist) >= dist;
-    if (!hasLineOfSight) continue;
+
+    if (!hasLineOfSight) {
+      if (enemy.behavior !== "stationary") moveAlongPath(enemy, map, player, dt);
+      continue;
+    }
+    enemy.path = null;
 
     const inAttackRange = dist <= enemy.attackRangeCells;
     if (inAttackRange && enemy.attackCooldownMs <= 0) {
